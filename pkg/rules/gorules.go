@@ -14,22 +14,41 @@ const (
 	GreaterThanOrEqual NumericComparisonOperator = ">="
 )
 
-type InstantiationFunction func(name string) (string, map[string]bool)
+type InstantiationArgs struct {
+	Name        string
+	gensymCount *int
+}
+
+func (i InstantiationArgs) Gensym() string {
+	val := fmt.Sprintf("%s%d", i.Name, i.gensymCount)
+	*i.gensymCount++
+	return val
+}
+
+type InstantiationFunction func(args InstantiationArgs) (string, map[string]bool)
 
 type Instantiable struct {
 	InstFunc InstantiationFunction
 }
 
-func (i Instantiable) Instantiate(name string) (string, map[string]bool) {
-	return i.InstFunc(name)
+func (i Instantiable) Instantiate(args InstantiationArgs) (string, map[string]bool) {
+	return i.InstFunc(args)
 }
 
 type NumericValueExp interface {
 	NumericGenerate() Instantiable
 }
 
+type ComparableValueExp interface {
+	ComparableGenerate() Instantiable
+}
+
 type TestExp interface {
 	TestGenerate() Instantiable
+}
+
+type StringVal struct {
+	Str string
 }
 
 type NumberVal struct {
@@ -52,17 +71,27 @@ type NumericBinaryTestVal struct {
 }
 
 func (n NumericBinaryTestVal) TestGenerate() Instantiable {
-	return Instantiable{InstFunc: func(name string) (string, map[string]bool) {
-		leftStr, leftRefs := n.Left.Instantiate(name)
-		rightStr, rightRefs := n.Right.Instantiate(name)
+	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
+		leftStr, leftRefs := n.Left.Instantiate(args)
+		rightStr, rightRefs := n.Right.Instantiate(args)
 		return fmt.Sprintf("%s %s %s", leftStr, n.Op, rightStr), mergeMaps(leftRefs, rightRefs)
 	}}
 }
 
+func (s StringVal) ComparableGenerate() Instantiable {
+	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
+		return fmt.Sprintf("'%s'", s.Str), map[string]bool{}
+	}}
+}
+
 func (n NumberVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(name string) (string, map[string]bool) {
+	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
 		return fmt.Sprintf("%G", n.Num), map[string]bool{}
 	}}
+}
+
+func (n NumberVal) ComparableGenerate() Instantiable {
+	return n.NumericGenerate()
 }
 
 func LT(left, right NumericValueExp) NumericBinaryTestVal {
@@ -71,6 +100,34 @@ func LT(left, right NumericValueExp) NumericBinaryTestVal {
 		Left:  left.NumericGenerate(),
 		Right: right.NumericGenerate(),
 	}
+}
+
+func LE(left, right NumericValueExp) NumericBinaryTestVal {
+	return NumericBinaryTestVal{
+		Op:    LessThanOrEqual,
+		Left:  left.NumericGenerate(),
+		Right: right.NumericGenerate(),
+	}
+}
+
+func GT(left, right NumericValueExp) NumericBinaryTestVal {
+	return NumericBinaryTestVal{
+		Op:    GreaterThan,
+		Left:  left.NumericGenerate(),
+		Right: right.NumericGenerate(),
+	}
+}
+
+func GE(left, right NumericValueExp) NumericBinaryTestVal {
+	return NumericBinaryTestVal{
+		Op:    GreaterThanOrEqual,
+		Left:  left.NumericGenerate(),
+		Right: right.NumericGenerate(),
+	}
+}
+
+func String(s string) StringVal {
+	return StringVal{Str: s}
 }
 
 func Number(n float64) NumberVal {
@@ -86,17 +143,25 @@ func JoinField(objectName string, path ...string) JoinFieldVal {
 }
 
 func (f FieldVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(name string) (string, map[string]bool) {
-		return fmt.Sprintf("json_extract(%s.data, '$.%s')", name, strings.Join(f.Path, ".")), map[string]bool{}
+	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
+		return fmt.Sprintf("json_extract(%s.data, '$.%s')", args.Name, strings.Join(f.Path, ".")), map[string]bool{}
 	},
 	}
 }
 
+func (f FieldVal) ComparableGenerate() Instantiable {
+	return f.NumericGenerate()
+}
+
 func (j JoinFieldVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(name string) (string, map[string]bool) {
+	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
 		return fmt.Sprintf("json_extract(%s.data, '$.%s')", j.Name, strings.Join(j.Path, ".")), map[string]bool{j.Name: true}
 	},
 	}
+}
+
+func (j JoinFieldVal) ComparableGenerate() Instantiable {
+	return j.NumericGenerate()
 }
 
 func mergeMaps(m1, m2 map[string]bool) map[string]bool {
