@@ -19,19 +19,24 @@ type InstantiationArgs struct {
 	gensymCount *int
 }
 
+type InstantiationResults struct {
+	Exp  string
+	Refs map[string]bool
+}
+
 func (i InstantiationArgs) Gensym() string {
 	val := fmt.Sprintf("%s%d", i.Name, i.gensymCount)
 	*i.gensymCount++
 	return val
 }
 
-type InstantiationFunction func(args InstantiationArgs) (string, map[string]bool)
+type InstantiationFunction func(args InstantiationArgs) InstantiationResults
 
 type Instantiable struct {
 	InstFunc InstantiationFunction
 }
 
-func (i Instantiable) Instantiate(args InstantiationArgs) (string, map[string]bool) {
+func (i Instantiable) Instantiate(args InstantiationArgs) InstantiationResults {
 	return i.InstFunc(args)
 }
 
@@ -71,22 +76,25 @@ type NumericBinaryTestVal struct {
 }
 
 func (n NumericBinaryTestVal) TestGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
-		leftStr, leftRefs := n.Left.Instantiate(args)
-		rightStr, rightRefs := n.Right.Instantiate(args)
-		return fmt.Sprintf("%s %s %s", leftStr, n.Op, rightStr), mergeMaps(leftRefs, rightRefs)
+	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+		leftResults := n.Left.Instantiate(args)
+		rightResults := n.Right.Instantiate(args)
+		return InstantiationResults{
+			Exp:  fmt.Sprintf("%s %s %s", leftResults.Exp, n.Op, rightResults.Exp),
+			Refs: mergeMaps(leftResults.Refs, rightResults.Refs),
+		}
 	}}
 }
 
 func (s StringVal) ComparableGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
-		return fmt.Sprintf("'%s'", s.Str), map[string]bool{}
+	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+		return InstantiationResults{Exp: fmt.Sprintf("'%s'", s.Str), Refs: map[string]bool{}}
 	}}
 }
 
 func (n NumberVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
-		return fmt.Sprintf("%G", n.Num), map[string]bool{}
+	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+		return InstantiationResults{Exp: fmt.Sprintf("%G", n.Num), Refs: map[string]bool{}}
 	}}
 }
 
@@ -143,8 +151,11 @@ func JoinField(objectName string, path ...string) JoinFieldVal {
 }
 
 func (f FieldVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
-		return fmt.Sprintf("json_extract(%s.data, '$.%s')", args.Name, strings.Join(f.Path, ".")), map[string]bool{}
+	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+		return InstantiationResults{
+			Exp:  fmt.Sprintf("json_extract(%s.data, '$.%s')", args.Name, strings.Join(f.Path, ".")),
+			Refs: map[string]bool{},
+		}
 	},
 	}
 }
@@ -154,8 +165,11 @@ func (f FieldVal) ComparableGenerate() Instantiable {
 }
 
 func (j JoinFieldVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) (string, map[string]bool) {
-		return fmt.Sprintf("json_extract(%s.data, '$.%s')", j.Name, strings.Join(j.Path, ".")), map[string]bool{j.Name: true}
+	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+		return InstantiationResults{
+			Exp:  fmt.Sprintf("json_extract(%s.data, '$.%s')", j.Name, strings.Join(j.Path, ".")),
+			Refs: map[string]bool{j.Name: true},
+		}
 	},
 	}
 }
