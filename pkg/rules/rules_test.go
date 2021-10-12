@@ -111,6 +111,22 @@ var _ = Context("Simple Expression Tests", func() {
 			"Test equal booleans",
 			EQ(Bool(true), JoinField("otherObject", "foo", "bar")),
 			func() string { return "true = json_extract(otherObject.data, '$.foo.bar')" },
+			func() map[string]bool { return map[string]bool{"otherObject": true} }),
+
+		Entry(
+			"Test not equal numbers",
+			NEQ(Number(6), JoinField("otherObject", "foo", "bar")),
+			func() string { return "6 <> json_extract(otherObject.data, '$.foo.bar')" },
+			func() map[string]bool { return map[string]bool{"otherObject": true} }),
+		Entry(
+			"Test not equal strings",
+			NEQ(String("grom"), JoinField("otherObject", "foo", "bar")),
+			func() string { return "'grom' <> json_extract(otherObject.data, '$.foo.bar')" },
+			func() map[string]bool { return map[string]bool{"otherObject": true} }),
+		Entry(
+			"Test not equal booleans",
+			NEQ(Bool(true), JoinField("otherObject", "foo", "bar")),
+			func() string { return "true <> json_extract(otherObject.data, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }))
 
 })
