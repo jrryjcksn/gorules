@@ -9,6 +9,8 @@ type NumericComparisonOperator string
 
 type ComparableComparisonOperator string
 
+type TestComparisonOperator string
+
 const (
 	LessThan           NumericComparisonOperator = "<"
 	GreaterThan        NumericComparisonOperator = ">"
@@ -19,6 +21,11 @@ const (
 const (
 	IsEqual    ComparableComparisonOperator = "="
 	IsNotEqual ComparableComparisonOperator = "<>"
+)
+
+const (
+	AndOp TestComparisonOperator = "AND"
+	OrOp  TestComparisonOperator = "OR"
 )
 
 type InstantiationArgs struct {
@@ -92,6 +99,12 @@ type ComparableBinaryTestVal struct {
 	Right Instantiable
 }
 
+type TestBinaryTestVal struct {
+	Op    TestComparisonOperator
+	Left  Instantiable
+	Right Instantiable
+}
+
 func (n NumericBinaryTestVal) TestGenerate() Instantiable {
 	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
 		leftResults := n.Left.Instantiate(args)
@@ -109,6 +122,17 @@ func (c ComparableBinaryTestVal) TestGenerate() Instantiable {
 		rightResults := c.Right.Instantiate(args)
 		return InstantiationResults{
 			Exp:  fmt.Sprintf("%s %s %s", leftResults.Exp, c.Op, rightResults.Exp),
+			Refs: mergeMaps(leftResults.Refs, rightResults.Refs),
+		}
+	}}
+}
+
+func (t TestBinaryTestVal) TestGenerate() Instantiable {
+	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+		leftResults := t.Left.Instantiate(args)
+		rightResults := t.Right.Instantiate(args)
+		return InstantiationResults{
+			Exp:  fmt.Sprintf("(%s) %s (%s)", leftResults.Exp, t.Op, rightResults.Exp),
 			Refs: mergeMaps(leftResults.Refs, rightResults.Refs),
 		}
 	}}
@@ -181,6 +205,22 @@ func NEQ(left, right ComparableValueExp) ComparableBinaryTestVal {
 		Op:    IsNotEqual,
 		Left:  left.ComparableGenerate(),
 		Right: right.ComparableGenerate(),
+	}
+}
+
+func AND(left, right TestExp) TestBinaryTestVal {
+	return TestBinaryTestVal{
+		Op:    AndOp,
+		Left:  left.TestGenerate(),
+		Right: right.TestGenerate(),
+	}
+}
+
+func OR(left, right TestExp) TestBinaryTestVal {
+	return TestBinaryTestVal{
+		Op:    OrOp,
+		Left:  left.TestGenerate(),
+		Right: right.TestGenerate(),
 	}
 }
 

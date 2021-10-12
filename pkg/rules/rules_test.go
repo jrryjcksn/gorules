@@ -128,5 +128,24 @@ var _ = Context("Simple Expression Tests", func() {
 			NEQ(Bool(true), JoinField("otherObject", "foo", "bar")),
 			func() string { return "true <> json_extract(otherObject.data, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }))
-
+	DescribeTable("AND and OR", func(testExp TestExp, inst func() string, refs func() map[string]bool) {
+		results := testExp.TestGenerate().Instantiate(args)
+		Expect(results.Exp).To(Equal(inst()))
+		Expect(results.Refs).To(Equal(refs()))
+	},
+		Entry(
+			"Test AND",
+			AND(LT(Number(6), Field("foo", "bar")), GT(Number(6), JoinField("otherObject", "foo", "bar"))),
+			func() string {
+				return fmt.Sprintf("(6 < json_extract(%s.data, '$.foo.bar')) AND (6 > json_extract(otherObject.data, '$.foo.bar'))",
+					args.Name)
+			},
+			func() map[string]bool { return map[string]bool{"otherObject": true} }),
+		Entry(
+			"Test OR",
+			OR(LT(Number(6), JoinField("yetAnotherObject", "foop", "barp")), GT(Number(6), JoinField("otherObject", "foo", "bar"))),
+			func() string {
+				return "(6 < json_extract(yetAnotherObject.data, '$.foop.barp')) OR (6 > json_extract(otherObject.data, '$.foo.bar'))"
+			},
+			func() map[string]bool { return map[string]bool{"yetAnotherObject": true, "otherObject": true} }))
 })
