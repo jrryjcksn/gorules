@@ -7,11 +7,18 @@ import (
 
 type NumericComparisonOperator string
 
+type ComparableComparisonOperator string
+
 const (
 	LessThan           NumericComparisonOperator = "<"
 	GreaterThan        NumericComparisonOperator = ">"
 	LessThanOrEqual    NumericComparisonOperator = "<="
 	GreaterThanOrEqual NumericComparisonOperator = ">="
+)
+
+const (
+	IsEqual    ComparableComparisonOperator = "="
+	IsNotEqual ComparableComparisonOperator = "<>"
 )
 
 type InstantiationArgs struct {
@@ -60,6 +67,10 @@ type NumberVal struct {
 	Num float64
 }
 
+type BoolVal struct {
+	Bit bool
+}
+
 type FieldVal struct {
 	Path []string
 }
@@ -75,6 +86,12 @@ type NumericBinaryTestVal struct {
 	Right Instantiable
 }
 
+type ComparableBinaryTestVal struct {
+	Op    ComparableComparisonOperator
+	Left  Instantiable
+	Right Instantiable
+}
+
 func (n NumericBinaryTestVal) TestGenerate() Instantiable {
 	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
 		leftResults := n.Left.Instantiate(args)
@@ -86,9 +103,26 @@ func (n NumericBinaryTestVal) TestGenerate() Instantiable {
 	}}
 }
 
+func (c ComparableBinaryTestVal) TestGenerate() Instantiable {
+	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+		leftResults := c.Left.Instantiate(args)
+		rightResults := c.Right.Instantiate(args)
+		return InstantiationResults{
+			Exp:  fmt.Sprintf("%s %s %s", leftResults.Exp, c.Op, rightResults.Exp),
+			Refs: mergeMaps(leftResults.Refs, rightResults.Refs),
+		}
+	}}
+}
+
 func (s StringVal) ComparableGenerate() Instantiable {
 	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
 		return InstantiationResults{Exp: fmt.Sprintf("'%s'", s.Str), Refs: map[string]bool{}}
+	}}
+}
+
+func (b BoolVal) ComparableGenerate() Instantiable {
+	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+		return InstantiationResults{Exp: fmt.Sprintf("%t", b.Bit), Refs: map[string]bool{}}
 	}}
 }
 
@@ -134,12 +168,32 @@ func GE(left, right NumericValueExp) NumericBinaryTestVal {
 	}
 }
 
+func EQ(left, right ComparableValueExp) ComparableBinaryTestVal {
+	return ComparableBinaryTestVal{
+		Op:    IsEqual,
+		Left:  left.ComparableGenerate(),
+		Right: right.ComparableGenerate(),
+	}
+}
+
+func NEQ(left, right ComparableValueExp) ComparableBinaryTestVal {
+	return ComparableBinaryTestVal{
+		Op:    IsNotEqual,
+		Left:  left.ComparableGenerate(),
+		Right: right.ComparableGenerate(),
+	}
+}
+
 func String(s string) StringVal {
 	return StringVal{Str: s}
 }
 
 func Number(n float64) NumberVal {
 	return NumberVal{Num: n}
+}
+
+func Bool(b bool) BoolVal {
+	return BoolVal{Bit: b}
 }
 
 func Field(path ...string) FieldVal {

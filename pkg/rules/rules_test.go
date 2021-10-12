@@ -96,5 +96,21 @@ var _ = Context("Simple Expression Tests", func() {
 			"Test greater than or equal",
 			GE(Number(6), JoinField("otherObject", "foo", "bar")),
 			func() string { return "6 >= json_extract(otherObject.data, '$.foo.bar')" },
+			func() map[string]bool { return map[string]bool{"otherObject": true} }),
+		Entry(
+			"Test equal numbers",
+			EQ(Number(6), JoinField("otherObject", "foo", "bar")),
+			func() string { return "6 = json_extract(otherObject.data, '$.foo.bar')" },
+			func() map[string]bool { return map[string]bool{"otherObject": true} }),
+		Entry(
+			"Test equal strings",
+			EQ(String("grom"), JoinField("otherObject", "foo", "bar")),
+			func() string { return "'grom' = json_extract(otherObject.data, '$.foo.bar')" },
+			func() map[string]bool { return map[string]bool{"otherObject": true} }),
+		Entry(
+			"Test equal booleans",
+			EQ(Bool(true), JoinField("otherObject", "foo", "bar")),
+			func() string { return "true = json_extract(otherObject.data, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }))
+
 })
