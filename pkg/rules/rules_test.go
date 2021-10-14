@@ -8,7 +8,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = Context("Simple Expression Tests", func() {
+var _ = Describe("Simple Expression Tests", func() {
 	emptyRefs := map[string]bool{}
 	emptyRefFunc := func() map[string]bool {
 		return emptyRefs
@@ -128,7 +128,7 @@ var _ = Context("Simple Expression Tests", func() {
 			NEQ(Bool(true), JoinField("otherObject", "foo", "bar")),
 			func() string { return "true <> json_extract(otherObject.data, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }))
-	DescribeTable("AND and OR", func(testExp TestExp, inst func() string, refs func() map[string]bool) {
+	DescribeTable("AND, OR and NOT", func(testExp TestExp, inst func() string, refs func() map[string]bool) {
 		results := testExp.TestGenerate().Instantiate(args)
 		Expect(results.Exp).To(Equal(inst()))
 		Expect(results.Refs).To(Equal(refs()))
@@ -146,6 +146,13 @@ var _ = Context("Simple Expression Tests", func() {
 			OR(LT(Number(6), JoinField("yetAnotherObject", "foop", "barp")), GT(Number(6), JoinField("otherObject", "foo", "bar"))),
 			func() string {
 				return "(6 < json_extract(yetAnotherObject.data, '$.foop.barp')) OR (6 > json_extract(otherObject.data, '$.foo.bar'))"
+			},
+			func() map[string]bool { return map[string]bool{"yetAnotherObject": true, "otherObject": true} }),
+		Entry(
+			"Test NOT",
+			NOT(OR(LT(Number(6), JoinField("yetAnotherObject", "foop", "barp")), GT(Number(6), JoinField("otherObject", "foo", "bar")))),
+			func() string {
+				return "NOT((6 < json_extract(yetAnotherObject.data, '$.foop.barp')) OR (6 > json_extract(otherObject.data, '$.foo.bar')))"
 			},
 			func() map[string]bool { return map[string]bool{"yetAnotherObject": true, "otherObject": true} }))
 })

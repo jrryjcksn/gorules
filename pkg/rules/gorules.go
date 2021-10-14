@@ -11,6 +11,10 @@ type ComparableComparisonOperator string
 
 type TestComparisonOperator string
 
+type UnaryTestOperator string
+
+const NotOp = "NOT"
+
 const (
 	LessThan           NumericComparisonOperator = "<"
 	GreaterThan        NumericComparisonOperator = ">"
@@ -105,6 +109,11 @@ type TestBinaryTestVal struct {
 	Right Instantiable
 }
 
+type UnaryTestVal struct {
+	Op  UnaryTestOperator
+	Arg Instantiable
+}
+
 func (n NumericBinaryTestVal) TestGenerate() Instantiable {
 	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
 		leftResults := n.Left.Instantiate(args)
@@ -134,6 +143,16 @@ func (t TestBinaryTestVal) TestGenerate() Instantiable {
 		return InstantiationResults{
 			Exp:  fmt.Sprintf("(%s) %s (%s)", leftResults.Exp, t.Op, rightResults.Exp),
 			Refs: mergeMaps(leftResults.Refs, rightResults.Refs),
+		}
+	}}
+}
+
+func (u UnaryTestVal) TestGenerate() Instantiable {
+	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+		argResults := u.Arg.Instantiate(args)
+		return InstantiationResults{
+			Exp:  fmt.Sprintf("%s(%s)", u.Op, argResults.Exp),
+			Refs: argResults.Refs,
 		}
 	}}
 }
@@ -224,6 +243,13 @@ func OR(left, right TestExp) TestBinaryTestVal {
 	}
 }
 
+func NOT(arg TestExp) UnaryTestVal {
+	return UnaryTestVal{
+		Op:  NotOp,
+		Arg: arg.TestGenerate(),
+	}
+}
+
 func String(s string) StringVal {
 	return StringVal{Str: s}
 }
@@ -286,47 +312,7 @@ func mergeMaps(m1, m2 map[string]bool) map[string]bool {
 	return m3
 }
 
-/* type ObjectRef {
-	Name string
-	Expression Exp
-}
-
-type Exp interface {
-	Instantiate(name string) (string, []string)
-}
-
-type NumberExp struct {
-	Value: float64
-}
-
-type FieldExp struct {
-	Path []string
-}
-
-type Numeric interface {
-	InstantiateNumber(name string) (string, []string)
-}
-
-func (i NumberExp) Instantiate(_ string) (string, []string) {
-	return fmt.Sprintf("%G", i), []string{}
-}
-
-func (i NumberExp) InstantiateNumber(_ string) (string, []string) {
-	return fmt.Sprintf("%G", i), []string{}
-}
-
-func (i FieldExp) Instantiate(name string) (string, []string) {
-	return fmt.Sprintf("%s.%s", i), []string{}
-}
-
-func (i NumberExp) InstantiateNumber(_ string) (string, []string) {
-	return fmt.Sprintf("%G", i), []string{}
-}
-
-func Number(float64 n) NumberExp {
-	return NumberExp{Value: n}
-}
-
+/*
 func init() {
 	Rule("rule1",
 		Tests(
@@ -355,99 +341,5 @@ func Rule(name string, query ruleQuery, actions ...action) error {
 	for _, typ := range query.Types {
 		rules[typ] = append(rules[typ], rule)
 	}
-}
-
-func Object(name string, exp ExpFunc) ObjectRef {
-	return ObjectRef{Name: name, Expression: exp(name)}
-}
-
-func (ef ExpFunc) Kind(kind string) ExpFunc {
-	return func(name string) string {
-		return fmt.Sprintf("((%s) AND %s.Kind = '%s')", ef(name), name, kind)
-	}
-}
-
-func (ef ExpFunc) Namespace(ns string) ExpFunc {
-	return func(name string) string {}
-		return fmt.Sprintf("((%s) AND %s.Namespace = '%s')", ef(name), name, ns)
-	}
-}
-
-
-func Join(name string, path ...string) ExpFunc {
-	return func(_ string) string {
-		return FieldRef{Name: name, Path: path}
-	}
-}
-
-func (or ObjectRef) OR(or1 ObjectRef, or2 ObjectRef) ObjectRef {
-	return ObjectRef{
-		Name: or.Name,
-		Expression: fmt.Sprintf("(%s) AND ((%s) OR (%s))", or.Expression, or1.Expression, or2.Expression)
-	}
-}
-
-func LT(field FieldRef, val float64) ObjectRef {
-	return Expression{
-		expStr: fmt.Sprintf("%s < %v", field, val)
-	}
-}
-
-func GT(field FieldRef, val float64) ObjectRef {
-	return Expression{
-		expStr: fmt.Sprintf("%s > %v", field, val)
-	}
-}
-func LE(field FieldRef, val float64) ObjectRef {
-	return Expression{
-		expStr: fmt.Sprintf("%s <= %v", field, val)
-	}
-}
-
-func GE(field FieldRef, val float64) ObjectRef {
-	return Expression{
-		expStr: fmt.Sprintf("%s >= %v", field, val)
-	}
-}
-
-func EQ(field FieldRef, val float64) ObjectRef {
-	return Expression{
-		expStr: fmt.Sprintf("%s = %v", field, val)
-	}
-}
-
-func NEQ(field FieldRef, val float64) ObjectRef {
-	return Expression{
-		expStr: fmt.Sprintf("%s <> %v", field, val)
-	}
-}
-
-
-var action1 = func(objs map[string]map[string]interface{}) error {
-	return AlertImpl("Insufficient replicas for deployment: %s",
-		func() (string, error) {
-			fieldVal0, err0 := FieldImpl(objs, "dep", []string{"Name"})
-			if err0 != nil {
-				return "", err0
-			}
-
-			return fmt.Sprintf("%v", fieldVal0), nil
-		})
-}
-
-var action2 = func(objs map[string]map[string]interface{}) error {
-	return ModifyImpl(objs[name], []string{"spec", "replicas"}, 2)
-}
-
-func ModifyImpl(obj map[string]interface{}, path []string, val interface{}) error {
-	if dberr := modifyDB(obj, path, val); dberr != nil {
-		return dberr
-	}
-
-	if k8serr := modifyK8s(obj, path, val); k8serr != nil {
-		return k8serr
-	}
-
-	return nil
 }
 */
