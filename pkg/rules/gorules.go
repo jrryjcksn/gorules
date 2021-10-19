@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -32,14 +33,18 @@ const (
 	OrOp  TestComparisonOperator = "OR"
 )
 
+type Table struct {
+	Name, BackingName string
+}
 type InstantiationArgs struct {
 	Name        string
 	gensymCount *int
 }
 
 type InstantiationResults struct {
-	Exp  string
-	Refs map[string]bool
+	Exp    string
+	Refs   map[string]bool
+	Tables []Table
 }
 
 func (i InstantiationArgs) Gensym() string {
@@ -48,14 +53,18 @@ func (i InstantiationArgs) Gensym() string {
 	return val
 }
 
-type InstantiationFunction func(args InstantiationArgs) InstantiationResults
+type InstantiationFunction func(args InstantiationArgs) (InstantiationResults, error)
 
 type Instantiable struct {
 	InstFunc InstantiationFunction
 }
 
-func (i Instantiable) Instantiate(args InstantiationArgs) InstantiationResults {
+func (i Instantiable) Instantiate(args InstantiationArgs) (InstantiationResults, error) {
 	return i.InstFunc(args)
+}
+
+type LiteralValueExp interface {
+	LiteralValue() interface{}
 }
 
 type NumericValueExp interface {
@@ -65,7 +74,9 @@ type NumericValueExp interface {
 type ComparableValueExp interface {
 	ComparableGenerate() Instantiable
 }
-
+type IterableValueExp interface {
+	IterableGenerate() Instantiable
+}
 type TestExp interface {
 	TestGenerate() Instantiable
 }
@@ -90,7 +101,9 @@ type JoinFieldVal struct {
 	Name string
 	Path []string
 }
-
+type ArrayVal struct {
+	Array []LiteralValueExp
+}
 type NumericBinaryTestVal struct {
 	Op    NumericComparisonOperator
 	Left  Instantiable
@@ -115,63 +128,107 @@ type UnaryTestVal struct {
 }
 
 func (n NumericBinaryTestVal) TestGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
-		leftResults := n.Left.Instantiate(args)
-		rightResults := n.Right.Instantiate(args)
-		return InstantiationResults{
-			Exp:  fmt.Sprintf("%s %s %s", leftResults.Exp, n.Op, rightResults.Exp),
-			Refs: mergeMaps(leftResults.Refs, rightResults.Refs),
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		leftResults, leftError := n.Left.Instantiate(args)
+		if leftError != nil {
+			return InstantiationResults{}, leftError
 		}
+
+		rightResults, rightError := n.Right.Instantiate(args)
+		if rightError != nil {
+			return InstantiationResults{}, rightError
+		}
+
+		return InstantiationResults{
+			Exp:    fmt.Sprintf("%s %s %s", leftResults.Exp, n.Op, rightResults.Exp),
+			Refs:   mergeMaps(leftResults.Refs, rightResults.Refs),
+			Tables: []Table{},
+		}, nil
 	}}
 }
 
 func (c ComparableBinaryTestVal) TestGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
-		leftResults := c.Left.Instantiate(args)
-		rightResults := c.Right.Instantiate(args)
-		return InstantiationResults{
-			Exp:  fmt.Sprintf("%s %s %s", leftResults.Exp, c.Op, rightResults.Exp),
-			Refs: mergeMaps(leftResults.Refs, rightResults.Refs),
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		leftResults, leftError := c.Left.Instantiate(args)
+		if leftError != nil {
+			return InstantiationResults{}, leftError
 		}
+
+		rightResults, rightError := c.Right.Instantiate(args)
+		if rightError != nil {
+			return InstantiationResults{}, rightError
+		}
+
+		return InstantiationResults{
+			Exp:    fmt.Sprintf("%s %s %s", leftResults.Exp, c.Op, rightResults.Exp),
+			Refs:   mergeMaps(leftResults.Refs, rightResults.Refs),
+			Tables: []Table{},
+		}, nil
 	}}
 }
 
 func (t TestBinaryTestVal) TestGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
-		leftResults := t.Left.Instantiate(args)
-		rightResults := t.Right.Instantiate(args)
-		return InstantiationResults{
-			Exp:  fmt.Sprintf("(%s) %s (%s)", leftResults.Exp, t.Op, rightResults.Exp),
-			Refs: mergeMaps(leftResults.Refs, rightResults.Refs),
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		leftResults, leftError := t.Left.Instantiate(args)
+		if leftError != nil {
+			return InstantiationResults{}, leftError
 		}
+
+		rightResults, rightError := t.Right.Instantiate(args)
+		if rightError != nil {
+			return InstantiationResults{}, rightError
+		}
+
+		return InstantiationResults{
+			Exp:    fmt.Sprintf("(%s) %s (%s)", leftResults.Exp, t.Op, rightResults.Exp),
+			Refs:   mergeMaps(leftResults.Refs, rightResults.Refs),
+			Tables: []Table{},
+		}, nil
 	}}
 }
 
 func (u UnaryTestVal) TestGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
-		argResults := u.Arg.Instantiate(args)
-		return InstantiationResults{
-			Exp:  fmt.Sprintf("%s(%s)", u.Op, argResults.Exp),
-			Refs: argResults.Refs,
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		argResults, err := u.Arg.Instantiate(args)
+		if err != nil {
+			return InstantiationResults{}, err
 		}
+
+		return InstantiationResults{
+			Exp:    fmt.Sprintf("%s(%s)", u.Op, argResults.Exp),
+			Refs:   argResults.Refs,
+			Tables: []Table{},
+		}, nil
 	}}
+}
+
+func (s StringVal) LiteralValue() interface{} {
+	return s.Str
 }
 
 func (s StringVal) ComparableGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
-		return InstantiationResults{Exp: fmt.Sprintf("'%s'", s.Str), Refs: map[string]bool{}}
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		return InstantiationResults{Exp: fmt.Sprintf("'%s'", s.Str), Refs: map[string]bool{}, Tables: []Table{}}, nil
 	}}
+}
+
+func (b BoolVal) LiteralValue() interface{} {
+	return b.Bit
 }
 
 func (b BoolVal) ComparableGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
-		return InstantiationResults{Exp: fmt.Sprintf("%t", b.Bit), Refs: map[string]bool{}}
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		return InstantiationResults{Exp: fmt.Sprintf("%t", b.Bit), Refs: map[string]bool{}, Tables: []Table{}}, nil
 	}}
 }
 
+func (n NumberVal) LiteralValue() interface{} {
+	return n.Num
+}
+
 func (n NumberVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
-		return InstantiationResults{Exp: fmt.Sprintf("%G", n.Num), Refs: map[string]bool{}}
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		return InstantiationResults{Exp: fmt.Sprintf("%G", n.Num), Refs: map[string]bool{}, Tables: []Table{}}, nil
 	}}
 }
 
@@ -270,12 +327,36 @@ func JoinField(objectName string, path ...string) JoinFieldVal {
 	return JoinFieldVal{Name: objectName, Path: path}
 }
 
-func (f FieldVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
-		return InstantiationResults{
-			Exp:  fmt.Sprintf("json_extract(%s.data, '$.%s')", args.Name, strings.Join(f.Path, ".")),
-			Refs: map[string]bool{},
+func Array(items ...LiteralValueExp) ArrayVal {
+	return ArrayVal{
+		Array: items,
+	}
+}
+
+func (a ArrayVal) IterableGenerate() Instantiable {
+	return Instantiable{InstFunc: func(_ InstantiationArgs) (InstantiationResults, error) {
+		val, err := toLiteralJsonArray(a.Array)
+		if err != nil {
+			return InstantiationResults{}, err
 		}
+
+		return InstantiationResults{
+			Exp:    fmt.Sprintf("json_each('%s')", val),
+			Refs:   map[string]bool{},
+			Tables: []Table{},
+		}, nil
+	},
+	}
+
+}
+
+func (f FieldVal) NumericGenerate() Instantiable {
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		return InstantiationResults{
+			Exp:    fmt.Sprintf("json_extract(%s.data, '$.%s')", args.Name, strings.Join(f.Path, ".")),
+			Refs:   map[string]bool{},
+			Tables: []Table{},
+		}, nil
 	},
 	}
 }
@@ -285,17 +366,33 @@ func (f FieldVal) ComparableGenerate() Instantiable {
 }
 
 func (j JoinFieldVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(args InstantiationArgs) InstantiationResults {
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
 		return InstantiationResults{
-			Exp:  fmt.Sprintf("json_extract(%s.data, '$.%s')", j.Name, strings.Join(j.Path, ".")),
-			Refs: map[string]bool{j.Name: true},
-		}
+			Exp:    fmt.Sprintf("json_extract(%s.data, '$.%s')", j.Name, strings.Join(j.Path, ".")),
+			Refs:   map[string]bool{j.Name: true},
+			Tables: []Table{},
+		}, nil
 	},
 	}
 }
 
 func (j JoinFieldVal) ComparableGenerate() Instantiable {
 	return j.NumericGenerate()
+}
+
+func toLiteralJsonArray(val []LiteralValueExp) (string, error) {
+	items := []interface{}{}
+
+	for _, item := range val {
+		items = append(items, item.LiteralValue())
+	}
+
+	result, err := json.Marshal(items)
+	if err != nil {
+		return "", err
+	}
+
+	return string(result), nil
 }
 
 func mergeMaps(m1, m2 map[string]bool) map[string]bool {
@@ -322,6 +419,7 @@ func init() {
 			Modify("dep", Field("spec", "replicas"), 2)))
 }
 
+baz.y.q CONTAINS bar.x = NOT(EXISTS(SELECT(true FROM bar, json_each(bar.data, '$.x') j1 WHERE bar.ID = <BAR ID> AND j1.value NOT IN(SELECT j2.value FROM baz, json_each(baz.data, '$.y.q') WHERE baz.ID = <BAZ ID>)
 func Rule(name string, query ruleQuery, actions ...action) error {
 	rule :=
 		Rule{

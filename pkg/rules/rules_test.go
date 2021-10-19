@@ -10,6 +10,8 @@ import (
 
 var _ = Describe("Simple Expression Tests", func() {
 	emptyRefs := map[string]bool{}
+	emptyTables := []Table{}
+
 	emptyRefFunc := func() map[string]bool {
 		return emptyRefs
 	}
@@ -26,7 +28,8 @@ var _ = Describe("Simple Expression Tests", func() {
 	})
 
 	DescribeTable("Rule Expression Numeric Value Tests", func(nve NumericValueExp, inst func() string, refs map[string]bool) {
-		results := nve.NumericGenerate().Instantiate(args)
+		results, err := nve.NumericGenerate().Instantiate(args)
+		Expect(err).To(BeNil())
 		Expect(results.Exp).To(Equal(inst()))
 		Expect(results.Refs).To(Equal(refs))
 	},
@@ -47,7 +50,8 @@ var _ = Describe("Simple Expression Tests", func() {
 			map[string]bool{"otherObject": true}))
 
 	DescribeTable("Rule Expression Comparable Value Tests", func(cve ComparableValueExp, inst func() string, refs map[string]bool) {
-		results := cve.ComparableGenerate().Instantiate(args)
+		results, err := cve.ComparableGenerate().Instantiate(args)
+		Expect(err).To(BeNil())
 		Expect(results.Exp).To(Equal(inst()))
 		Expect(results.Refs).To(Equal(refs))
 	},
@@ -72,8 +76,23 @@ var _ = Describe("Simple Expression Tests", func() {
 			func() string { return "'a string'" },
 			emptyRefs))
 
+	DescribeTable("Rule Expression Iterated Value Tests", func(ive IterableValueExp, inst func() string, refs map[string]bool, tables []Table) {
+		results, err := ive.IterableGenerate().Instantiate(args)
+		Expect(err).To(BeNil())
+		Expect(results.Exp).To(Equal(inst()))
+		Expect(results.Refs).To(Equal(refs))
+		Expect(results.Tables).To(Equal(tables))
+	},
+		Entry(
+			"Test json array constant",
+			Array(String("foo"), Number(6), Bool(true)),
+			func() string { return `json_each('["foo",6,true]')` },
+			emptyRefs,
+			emptyTables))
+
 	DescribeTable("Rule Expression Comparison Tests", func(testExp TestExp, inst func() string, refs func() map[string]bool) {
-		results := testExp.TestGenerate().Instantiate(args)
+		results, err := testExp.TestGenerate().Instantiate(args)
+		Expect(err).To(BeNil())
 		Expect(results.Exp).To(Equal(inst()))
 		Expect(results.Refs).To(Equal(refs()))
 	},
@@ -129,7 +148,8 @@ var _ = Describe("Simple Expression Tests", func() {
 			func() string { return "true <> json_extract(otherObject.data, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }))
 	DescribeTable("AND, OR and NOT", func(testExp TestExp, inst func() string, refs func() map[string]bool) {
-		results := testExp.TestGenerate().Instantiate(args)
+		results, err := testExp.TestGenerate().Instantiate(args)
+		Expect(err).To(BeNil())
 		Expect(results.Exp).To(Equal(inst()))
 		Expect(results.Refs).To(Equal(refs()))
 	},
