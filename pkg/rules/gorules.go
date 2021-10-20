@@ -38,6 +38,7 @@ type Table struct {
 }
 type InstantiationArgs struct {
 	Name        string
+	Tables      map[string]string
 	gensymCount *int
 }
 
@@ -47,8 +48,22 @@ type InstantiationResults struct {
 	Tables []Table
 }
 
+func (i InstantiationArgs) PeekGensym() string {
+	return fmt.Sprintf("%s%d", i.Tables[i.Name], *i.gensymCount)
+}
+
+func (i InstantiationArgs) LastGensym() string {
+	return fmt.Sprintf("%s%d", i.Tables[i.Name], *i.gensymCount-1)
+}
+
 func (i InstantiationArgs) Gensym() string {
-	val := fmt.Sprintf("%s%d", i.Name, i.gensymCount)
+	val := fmt.Sprintf("%s%d", i.Tables[i.Name], *i.gensymCount)
+	*i.gensymCount++
+	return val
+}
+
+func (i InstantiationArgs) GenJoinSym(name string) string {
+	val := fmt.Sprintf("%s%d", name, *i.gensymCount)
 	*i.gensymCount++
 	return val
 }
@@ -353,7 +368,7 @@ func (a ArrayVal) IterableGenerate() Instantiable {
 func (f FieldVal) NumericGenerate() Instantiable {
 	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
 		return InstantiationResults{
-			Exp:    fmt.Sprintf("json_extract(%s.data, '$.%s')", args.Name, strings.Join(f.Path, ".")),
+			Exp:    fmt.Sprintf("json_extract(%s.data, '$.%s')", args.Tables[args.Name], strings.Join(f.Path, ".")),
 			Refs:   map[string]bool{},
 			Tables: []Table{},
 		}, nil
@@ -365,10 +380,22 @@ func (f FieldVal) ComparableGenerate() Instantiable {
 	return f.NumericGenerate()
 }
 
+func (f FieldVal) IterableGenerate() Instantiable {
+	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		name := args.Gensym()
+		return InstantiationResults{
+			Exp:    fmt.Sprintf("json_each(%s.data, '$.%s')", args.Tables[args.Name], strings.Join(f.Path, ".")),
+			Refs:   map[string]bool{},
+			Tables: []Table{{Name: name, BackingName: args.Tables[args.Name]}},
+		}, nil
+	},
+	}
+}
+
 func (j JoinFieldVal) NumericGenerate() Instantiable {
 	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
 		return InstantiationResults{
-			Exp:    fmt.Sprintf("json_extract(%s.data, '$.%s')", j.Name, strings.Join(j.Path, ".")),
+			Exp:    fmt.Sprintf("json_extract(%s.data, '$.%s')", args.Tables[j.Name], strings.Join(j.Path, ".")),
 			Refs:   map[string]bool{j.Name: true},
 			Tables: []Table{},
 		}, nil
