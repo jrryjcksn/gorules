@@ -2,10 +2,13 @@ package rules
 
 import (
 	"fmt"
+	"strings"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
+
+	"database/sql"
 )
 
 var _ = Describe("Simple Expression Tests", func() {
@@ -273,56 +276,54 @@ var _ = Describe("Simple Expression Tests", func() {
 // })
 
 var _ = Describe("Instantiation Tests", func() {
-	var im *InstantiationManager
+	var pim *PrioritizedInstantiationManager
 
 	BeforeEach(func() {
-		im = NewInstantiationManager()
+		pim = NewPrioritizedInstantiationManager()
 	})
 
 	It("Adds and removes instantiations", func() {
 		p0 := InstantiationPriority(0)
-		i1 := &Instantiation{}
-		im.AddInstantiation(p0, i1)
-		Expect(im.Priorities[p0].Populated).To(HaveLen(1))
-		Expect(im.Priorities[p0].Free).To(HaveLen(0))
-		i2 := &Instantiation{}
-		im.AddInstantiation(p0, i2)
-		Expect(im.Priorities[p0].Populated).To(HaveLen(2))
-		Expect(im.Priorities[p0].Free).To(HaveLen(0))
-		im.RemoveInstantiation(i1)
-		Expect(im.Priorities[p0].Populated).To(HaveLen(2))
-		Expect(im.Priorities[p0].Free).To(HaveLen(1))
-		i3 := &Instantiation{}
-		im.AddInstantiation(p0, i3)
-		Expect(im.Priorities[p0].Populated).To(HaveLen(2))
-		Expect(im.Priorities[p0].Free).To(HaveLen(0))
-		i4 := &Instantiation{}
-		im.AddInstantiation(p0, i4)
-		Expect(im.Priorities[p0].Populated).To(HaveLen(3))
-		Expect(im.Priorities[p0].Free).To(HaveLen(0))
+		i1 := &Instantiation{Priority: p0}
+		pim.AddInstantiation(i1)
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(1))
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(0))
+		i2 := &Instantiation{Priority: p0}
+		pim.AddInstantiation(i2)
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(2))
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(0))
+		pim.RemoveInstantiation(i1)
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(2))
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(1))
+		i3 := &Instantiation{Priority: p0}
+		pim.AddInstantiation(i3)
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(2))
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(0))
+		i4 := &Instantiation{Priority: p0}
+		pim.AddInstantiation(i4)
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(3))
+		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(0))
 
 		p10 := InstantiationPriority(10)
-		Expect(im.Priorities[p10]).To(BeNil())
-
-		i10_1 := &Instantiation{}
-		im.AddInstantiation(p10, i10_1)
-		Expect(im.Priorities[p10].Populated).To(HaveLen(1))
-		Expect(im.Priorities[p10].Free).To(HaveLen(0))
-		i10_2 := &Instantiation{}
-		im.AddInstantiation(p10, i10_2)
-		Expect(im.Priorities[p10].Populated).To(HaveLen(2))
-		Expect(im.Priorities[p10].Free).To(HaveLen(0))
-		im.RemoveInstantiation(i10_1)
-		Expect(im.Priorities[p10].Populated).To(HaveLen(2))
-		Expect(im.Priorities[p10].Free).To(HaveLen(1))
-		i10_3 := &Instantiation{}
-		im.AddInstantiation(p10, i10_3)
-		Expect(im.Priorities[p10].Populated).To(HaveLen(2))
-		Expect(im.Priorities[p10].Free).To(HaveLen(0))
-		i10_4 := &Instantiation{}
-		im.AddInstantiation(p10, i10_4)
-		Expect(im.Priorities[p10].Populated).To(HaveLen(3))
-		Expect(im.Priorities[p10].Free).To(HaveLen(0))
+		i10_1 := &Instantiation{Priority: p10}
+		pim.AddInstantiation(i10_1)
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(1))
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(0))
+		i10_2 := &Instantiation{Priority: p10}
+		pim.AddInstantiation(i10_2)
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(2))
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(0))
+		pim.RemoveInstantiation(i10_1)
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(2))
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(1))
+		i10_3 := &Instantiation{Priority: p10}
+		pim.AddInstantiation(i10_3)
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(2))
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(0))
+		i10_4 := &Instantiation{Priority: p10}
+		pim.AddInstantiation(i10_4)
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(3))
+		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(0))
 	})
 })
 
@@ -374,3 +375,36 @@ var _ = Describe("Matcher Tests", func() {
 			emptyRefs,
 		))
 })
+
+var testData string = `insert into resources (kind, namespace, name, data) values ('Ball', 'test', 'foo', '{"kind": "Ball", "namespace": "test", "name": "foo", "color": "red", "size": 10}')
+insert into resources (kind, namespace, name, data) values ('Ball', 'test', 'bar', '{"kind": "Ball", "namespace": "test", "name": "bar", "color": "blue", "size": 20}')
+insert into resources (kind, namespace, name, data) values ('Cube', 'test', 'baz', '{"kind": "Cube", "namespace": "test", "name": "baz", "color": "blue", "size": 30}')
+insert into resources (kind, namespace, name, data) values ('Cube', 'test', 'quux', '{"kind": "Cube", "namespace": "test", "name": "quux", "color": "green", "size": 20}')
+insert into resources (kind, namespace, name, data) values ('Cube', 'test', 'derp', '{"kind": "Cube", "namespace": "test", "name": "baz", "color": "red", "size": 40}')
+insert into resources (kind, namespace, name, data) values ('Cylinder', 'test', 'wanda', '{"kind": "Cylinder", "namespace": "test", "name": "wanda", "color": "red", "size": 40}')
+insert into resources (kind, namespace, name, data) values ('Cylinder', 'test', 'groz', '{"kind": "Cylinder", "namespace": "test", "name": "groz", "color": "green", "size": 10}')
+insert into resources (kind, namespace, name, data) values ('Pyramid', 'test', 'foom', '{"kind": "Pyramid", "namespace": "test", "name": "foom", "color": "red", "size": 30}')
+insert into resources (kind, namespace, name, data) values ('Pyramid', 'test', 'gorp', '{"kind": "Pyramid", "namespace": "test", "name": "gorp", "color": "green", "size": 10}')`
+
+func getTestDB() (*sql.DB, error) {
+	db, err := getDB()
+	Expect(err).To(BeNil())
+
+	entries := strings.Split(testData, "\n")
+	fmt.Printf("ENTRIES: %v, LEN: %d\n", entries, len(entries))
+
+	for _, entry := range entries {
+		s, err := db.Prepare(entry)
+		fmt.Printf("ENTRY: %s\n", entry)
+		if err != nil {
+			return nil, err
+		}
+
+		_, err = s.Exec()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return db, nil
+}

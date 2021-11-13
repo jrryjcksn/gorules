@@ -68,57 +68,105 @@ type InstantiationIndex int
 type InstantiationPriority int
 
 type Instantiation struct {
-	PriorityLevel *InstantiationPriorityLevel
-	Index         InstantiationIndex
+	Priority             InstantiationPriority
+	InstantiationManager *InstantiationManager
+	Index                InstantiationIndex
 }
 
-type InstantiationPriorityLevel struct {
+type InstantiationManager struct {
 	Populated []*Instantiation
 	Free      []InstantiationIndex
 }
 
-type InstantiationManager struct {
-	Priorities map[InstantiationPriority]*InstantiationPriorityLevel
+type PriorityEntry struct {
+	Priority InstantiationPriority
+	Manager  *InstantiationManager
 }
 
-func NewInstantiationManager() *InstantiationManager {
-	return &InstantiationManager{Priorities: map[InstantiationPriority]*InstantiationPriorityLevel{}}
+type PrioritizedInstantiationManager struct {
+	PriorityMap map[InstantiationPriority]int
+	Priorities  []PriorityEntry
 }
 
-func (im *InstantiationManager) AddInstantiation(priority InstantiationPriority, inst *Instantiation) {
-	plevel := im.Priorities[priority]
-
-	if plevel == nil {
-		plevel = &InstantiationPriorityLevel{Populated: []*Instantiation{}, Free: []InstantiationIndex{}}
-		im.Priorities[priority] = plevel
+func NewPrioritizedInstantiationManager() *PrioritizedInstantiationManager {
+	return &PrioritizedInstantiationManager{
+		PriorityMap: map[InstantiationPriority]int{},
+		Priorities:  []PriorityEntry{},
 	}
+}
 
-	inst.PriorityLevel = plevel
+func (pim *PrioritizedInstantiationManager) AddInstantiation(inst *Instantiation) {
+	var im *InstantiationManager
 
-	if len(plevel.Free) == 0 {
-		pop := plevel.Populated
-		inst.Index = InstantiationIndex(len(pop))
-		plevel.Populated = append(pop, inst)
+	priority := inst.Priority
+	pindex, ok := pim.PriorityMap[priority]
+
+	if ok {
+		im = pim.Priorities[pindex].Manager
 	} else {
-		free := plevel.Free
-		last := len(free) - 1
-		inst.Index = free[last]
-		plevel.Free = free[0:last]
+		im = &InstantiationManager{Populated: []*Instantiation{}, Free: []InstantiationIndex{}}
+
+		index := -1
+
+		for idx, entry := range pim.Priorities {
+			if entry.Priority > priority {
+				pim.Priorities = append(pim.Priorities[:idx+1], pim.Priorities[idx:]...)
+				pim.Priorities[idx] = PriorityEntry{Priority: priority, Manager: im}
+				index = idx
+				break
+			}
+		}
+
+		if index == -1 {
+			pim.PriorityMap[priority] = len(pim.Priorities)
+			pim.Priorities = append(pim.Priorities, PriorityEntry{Priority: priority, Manager: im})
+		} else {
+			pim.PriorityMap[priority] = index
+		}
 	}
+
+	im.AddInstantiation(inst)
+	// inst.InstantiationManager = im
+
+	// if len(im.Free) == 0 {
+	//  pop := im.Populated
+	//  inst.Index = InstantiationIndex(len(pop))
+	//  im.Populated = append(pop, inst)
+	// } else {
+	//  free := im.Free
+	//  last := len(free) - 1
+	//  inst.Index = free[last]
+	//  im.Free = free[0:last]
+	// }
 }
 
-func (im *InstantiationManager) RemoveInstantiation(inst *Instantiation) {
-	plevel := inst.PriorityLevel
+func (pim *PrioritizedInstantiationManager) RemoveInstantiation(inst *Instantiation) {
+	im := inst.InstantiationManager
 
-	if plevel == nil {
+	if im == nil {
 		return
 	}
 
-	plevel.Populated[inst.Index] = nil
-	plevel.Free = append(plevel.Free, inst.Index)
+	im.Populated[inst.Index] = nil
+	im.Free = append(im.Free, inst.Index)
 
-	inst.PriorityLevel = nil
+	inst.InstantiationManager = nil
 	inst.Index = InstantiationIndex(-1)
+}
+
+func (im *InstantiationManager) AddInstantiation(inst *Instantiation) {
+	inst.InstantiationManager = im
+
+	if len(im.Free) == 0 {
+		pop := im.Populated
+		inst.Index = InstantiationIndex(len(pop))
+		im.Populated = append(pop, inst)
+	} else {
+		free := im.Free
+		last := len(free) - 1
+		inst.Index = free[last]
+		im.Free = free[0:last]
+	}
 }
 
 type Engine struct {
