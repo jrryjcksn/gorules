@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -46,12 +47,12 @@ var _ = Describe("Simple Expression Tests", func() {
 		Entry(
 			"Test simple field",
 			Field("foo", "bar"),
-			func() string { return fmt.Sprintf("json_extract(%s.data, '$.foo.bar')", args.Name) },
+			func() string { return fmt.Sprintf("json_extract(%s.DATA, '$.foo.bar')", args.Name) },
 			emptyRefs),
 		Entry(
 			"Test join field",
 			JoinField("otherObject", "foo", "bar"),
-			func() string { return "json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "json_extract(otherObject.DATA, '$.foo.bar')" },
 			map[string]bool{"otherObject": true}))
 
 	DescribeTable("Rule Expression Comparable Value Tests", func(cve ComparableValueExp, inst func() string, refs map[string]bool) {
@@ -68,12 +69,12 @@ var _ = Describe("Simple Expression Tests", func() {
 		Entry(
 			"Test simple field",
 			Field("foo", "bar"),
-			func() string { return fmt.Sprintf("json_extract(%s.data, '$.foo.bar')", args.Name) },
+			func() string { return fmt.Sprintf("json_extract(%s.DATA, '$.foo.bar')", args.Name) },
 			emptyRefs),
 		Entry(
 			"Test join field",
 			JoinField("otherObject", "foo", "bar"),
-			func() string { return "json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "json_extract(otherObject.DATA, '$.foo.bar')" },
 			map[string]bool{"otherObject": true}),
 		Entry(
 			"Test string constant",
@@ -98,7 +99,7 @@ var _ = Describe("Simple Expression Tests", func() {
 			"Test Iterable Field",
 			Field("foo", "bar"),
 			func() string {
-				return `select each1.value from objtab objtab0, json_each(objtab0.data, '$.foo.bar') each1 where objtab0.id = objtab.id`
+				return `select each1.value from objtab objtab0, json_each(objtab0.DATA, '$.foo.bar') each1 where objtab0.id = objtab.id`
 			},
 			emptyRefs,
 			emptyTables),
@@ -106,7 +107,7 @@ var _ = Describe("Simple Expression Tests", func() {
 			"Test Iterable Join Field",
 			JoinField("otherObject", "foo", "bar"),
 			func() string {
-				return `select each1.value from otherObjTab otherObjTab0, json_each(otherObjTab0.data, '$.foo.bar') each1 where otherObjTab0.id = otherObjTab.id`
+				return `select each1.value from otherObjTab otherObjTab0, json_each(otherObjTab0.DATA, '$.foo.bar') each1 where otherObjTab0.id = otherObjTab.id`
 			},
 			emptyRefs,
 			emptyTables))
@@ -128,7 +129,7 @@ var _ = Describe("Simple Expression Tests", func() {
 			"Test Iterable Field",
 			Field("foo", "bar"),
 			func() string {
-				return `select each1.key from objtab objtab0, json_each(objtab0.data, '$.foo.bar') each1 where objtab0.id = objtab.id`
+				return `select each1.key from objtab objtab0, json_each(objtab0.DATA, '$.foo.bar') each1 where objtab0.id = objtab.id`
 			},
 			emptyRefs,
 			emptyTables),
@@ -136,7 +137,7 @@ var _ = Describe("Simple Expression Tests", func() {
 			"Test Iterable Join Field",
 			JoinField("otherObject", "foo", "bar"),
 			func() string {
-				return `select each1.key from otherObjTab otherObjTab0, json_each(otherObjTab0.data, '$.foo.bar') each1 where otherObjTab0.id = otherObjTab.id`
+				return `select each1.key from otherObjTab otherObjTab0, json_each(otherObjTab0.DATA, '$.foo.bar') each1 where otherObjTab0.id = otherObjTab.id`
 			},
 			emptyRefs,
 			emptyTables))
@@ -160,7 +161,7 @@ var _ = Describe("Simple Expression Tests", func() {
 			"Test Iterable Field",
 			Field("foo", "bar"),
 			func() string {
-				return `select json_object(each1.key, each1.value) from objtab objtab0, json_each(objtab0.data, '$.foo.bar') each1 where objtab0.id = objtab.id`
+				return `select json_object(each1.key, each1.value) from objtab objtab0, json_each(objtab0.DATA, '$.foo.bar') each1 where objtab0.id = objtab.id`
 			},
 			emptyRefs,
 			emptyTables),
@@ -168,7 +169,7 @@ var _ = Describe("Simple Expression Tests", func() {
 			"Test Iterable Join Field",
 			JoinField("otherObject", "foo", "bar"),
 			func() string {
-				return `select json_object(each1.key, each1.value) from otherObjTab otherObjTab0, json_each(otherObjTab0.data, '$.foo.bar') each1 where otherObjTab0.id = otherObjTab.id`
+				return `select json_object(each1.key, each1.value) from otherObjTab otherObjTab0, json_each(otherObjTab0.DATA, '$.foo.bar') each1 where otherObjTab0.id = otherObjTab.id`
 			},
 			emptyRefs,
 			emptyTables))
@@ -182,53 +183,53 @@ var _ = Describe("Simple Expression Tests", func() {
 		Entry(
 			"Test less than",
 			LT(Number(6), Field("foo", "bar")),
-			func() string { return fmt.Sprintf("6 < json_extract(%s.data, '$.foo.bar')", args.Name) },
+			func() string { return fmt.Sprintf("6 < json_extract(%s.DATA, '$.foo.bar')", args.Name) },
 			emptyRefFunc),
 		Entry(
 			"Test less than or equal",
 			LE(Number(6), Field("foo", "bar")),
-			func() string { return fmt.Sprintf("6 <= json_extract(%s.data, '$.foo.bar')", args.Name) },
+			func() string { return fmt.Sprintf("6 <= json_extract(%s.DATA, '$.foo.bar')", args.Name) },
 			emptyRefFunc),
 		Entry(
 			"Test greater than",
 			GT(Number(6), JoinField("otherObject", "foo", "bar")),
-			func() string { return "6 > json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "6 > json_extract(otherObject.DATA, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }),
 		Entry(
 			"Test greater than or equal",
 			GE(Number(6), JoinField("otherObject", "foo", "bar")),
-			func() string { return "6 >= json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "6 >= json_extract(otherObject.DATA, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }),
 		Entry(
 			"Test equal numbers",
 			EQ(Number(6), JoinField("otherObject", "foo", "bar")),
-			func() string { return "6 = json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "6 = json_extract(otherObject.DATA, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }),
 		Entry(
 			"Test equal strings",
 			EQ(String("grom"), JoinField("otherObject", "foo", "bar")),
-			func() string { return "'grom' = json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "'grom' = json_extract(otherObject.DATA, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }),
 		Entry(
 			"Test equal booleans",
 			EQ(Bool(true), JoinField("otherObject", "foo", "bar")),
-			func() string { return "true = json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "true = json_extract(otherObject.DATA, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }),
 
 		Entry(
 			"Test not equal numbers",
 			NEQ(Number(6), JoinField("otherObject", "foo", "bar")),
-			func() string { return "6 <> json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "6 <> json_extract(otherObject.DATA, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }),
 		Entry(
 			"Test not equal strings",
 			NEQ(String("grom"), JoinField("otherObject", "foo", "bar")),
-			func() string { return "'grom' <> json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "'grom' <> json_extract(otherObject.DATA, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }),
 		Entry(
 			"Test not equal booleans",
 			NEQ(Bool(true), JoinField("otherObject", "foo", "bar")),
-			func() string { return "true <> json_extract(otherObject.data, '$.foo.bar')" },
+			func() string { return "true <> json_extract(otherObject.DATA, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }))
 	DescribeTable("AND, OR and NOT", func(testExp TestExp, inst func() string, refs func() map[string]bool) {
 		results, err := testExp.TestGenerate().Instantiate(args)
@@ -240,7 +241,7 @@ var _ = Describe("Simple Expression Tests", func() {
 			"Test AND",
 			AND(LT(Number(6), Field("foo", "bar")), GT(Number(6), JoinField("otherObject", "foo", "bar"))),
 			func() string {
-				return fmt.Sprintf("(6 < json_extract(%s.data, '$.foo.bar')) AND (6 > json_extract(otherObject.data, '$.foo.bar'))",
+				return fmt.Sprintf("(6 < json_extract(%s.DATA, '$.foo.bar')) AND (6 > json_extract(otherObject.DATA, '$.foo.bar'))",
 					args.Name)
 			},
 			func() map[string]bool { return map[string]bool{"otherObject": true} }),
@@ -248,152 +249,155 @@ var _ = Describe("Simple Expression Tests", func() {
 			"Test OR",
 			OR(LT(Number(6), JoinField("yetAnotherObject", "foop", "barp")), GT(Number(6), JoinField("otherObject", "foo", "bar"))),
 			func() string {
-				return "(6 < json_extract(yetAnotherObject.data, '$.foop.barp')) OR (6 > json_extract(otherObject.data, '$.foo.bar'))"
+				return "(6 < json_extract(yetAnotherObject.DATA, '$.foop.barp')) OR (6 > json_extract(otherObject.DATA, '$.foo.bar'))"
 			},
 			func() map[string]bool { return map[string]bool{"yetAnotherObject": true, "otherObject": true} }),
 		Entry(
 			"Test NOT",
 			NOT(OR(LT(Number(6), JoinField("yetAnotherObject", "foop", "barp")), GT(Number(6), JoinField("otherObject", "foo", "bar")))),
 			func() string {
-				return "NOT((6 < json_extract(yetAnotherObject.data, '$.foop.barp')) OR (6 > json_extract(otherObject.data, '$.foo.bar')))"
+				return "NOT((6 < json_extract(yetAnotherObject.DATA, '$.foop.barp')) OR (6 > json_extract(otherObject.DATA, '$.foo.bar')))"
 			},
 			func() map[string]bool { return map[string]bool{"yetAnotherObject": true, "otherObject": true} }))
 })
 
-// var _ = Describe("Rule Tuple Tests", func() {
-//  var e *Engine
-
-//  BeforeEach(func() {
-//      e = NewEngine()
-//  })
-
-//  It("Generates a new tuple indexed set of instantiations", func() {
-//      e.NewRule("DeploymentReplicas")
-//      Expect(e.RuleIndices).To(HaveLen(1))
-//      Expect(e.TupleInstantiations).To(HaveLen(1))
-//      Expect(e.TupleInstantiations[0]).To(Not(BeNil()))
-//  })
-// })
-
-var _ = Describe("Instantiation Tests", func() {
-	var pim *PrioritizedInstantiationManager
-
-	BeforeEach(func() {
-		pim = NewPrioritizedInstantiationManager()
-	})
-
-	It("Adds and removes instantiations", func() {
-		p0 := InstantiationPriority(0)
-		i1 := &Instantiation{Priority: p0}
-		pim.AddInstantiation(i1)
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(1))
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(0))
-		i2 := &Instantiation{Priority: p0}
-		pim.AddInstantiation(i2)
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(2))
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(0))
-		pim.RemoveInstantiation(i1)
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(2))
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(1))
-		i3 := &Instantiation{Priority: p0}
-		pim.AddInstantiation(i3)
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(2))
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(0))
-		i4 := &Instantiation{Priority: p0}
-		pim.AddInstantiation(i4)
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Populated).To(HaveLen(3))
-		Expect(pim.Priorities[pim.PriorityMap[p0]].Manager.Free).To(HaveLen(0))
-
-		p10 := InstantiationPriority(10)
-		i10_1 := &Instantiation{Priority: p10}
-		pim.AddInstantiation(i10_1)
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(1))
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(0))
-		i10_2 := &Instantiation{Priority: p10}
-		pim.AddInstantiation(i10_2)
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(2))
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(0))
-		pim.RemoveInstantiation(i10_1)
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(2))
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(1))
-		i10_3 := &Instantiation{Priority: p10}
-		pim.AddInstantiation(i10_3)
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(2))
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(0))
-		i10_4 := &Instantiation{Priority: p10}
-		pim.AddInstantiation(i10_4)
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Populated).To(HaveLen(3))
-		Expect(pim.Priorities[pim.PriorityMap[p10]].Manager.Free).To(HaveLen(0))
-	})
-})
-
-var _ = Describe("Matcher Tests", func() {
+var _ = Describe("Rule Tests", func() {
 	var args InstantiationArgs
-	var count int
-	emptyRefs := map[string]bool{}
 
 	BeforeEach(func() {
-		count = 0
 		args = InstantiationArgs{
-			Name:      "foo",
-			RuleIndex: 0,
-			KindsToTables: map[string]string{
-				"*": "Resources",
-			},
-			Tables: map[string]string{
-				"foo": "Resources",
-			},
-			gensymCount: &count,
+			RuleIndex: 20,
+			Priority:  10,
 		}
 	})
-	DescribeTable("Simple Match Tests", func(me MatchExp, inst string, tables map[string]string, refs map[string]bool) {
-		results, err := me.MatchGenerate().Instantiate(args)
-		Expect(err).To(BeNil())
-		Expect(results.Exp).To(Equal(inst))
-		Expect(results.Tables).To(Equal(tables))
-	},
-		Entry(
-			"One table",
-			Match("Deployment", "foo", Namespace("wego-system"), LT(Field("spec", "replicas"), Number(2))),
-			"(foo.Namespace = 'wego-system') AND (json_extract(foo.data, '$.spec.replicas') < 2)",
-			map[string]string{"foo": "Resources"},
-			emptyRefs,
-		))
-	DescribeTable("Conditions Tests", func(ce ConditionsExp, inst string, tables map[string]string, refs map[string]bool) {
-		results, err := ce.ConditionsGenerate().Instantiate(args)
-		Expect(err).To(BeNil())
-		Expect(results.Exp).To(Equal(inst))
-		Expect(results.Tables).To(Equal(tables))
-	},
-		Entry(
-			"Two tables",
+
+	It("generates the correct queries and indices", func() {
+		rule, err := Rule(
+			Name("rule1"),
 			Conditions(
 				Match("Deployment", "foo", Namespace("wego-system"), LT(Field("spec", "replicas"), Number(2))),
-				Match("Deployment", "bar", Namespace("wego-system"), EQ(Field("spec", "replicas"), JoinField("foo", "spec", "replicas")))),
-			`SELECT json_array(0, json_array(foo.ID, bar.ID, json("[]"))) FROM Resources foo JOIN Resources bar ON foo.Kind = 'Deployment' AND bar.Kind = 'Deployment' AND ((foo.Namespace = 'wego-system') AND (json_extract(foo.data, '$.spec.replicas') < 2)) AND ((bar.Namespace = 'wego-system') AND (json_extract(bar.data, '$.spec.replicas') = json_extract(foo.data, '$.spec.replicas')))`,
-			map[string]string{"foo": "Resources", "bar": "Resources"},
-			emptyRefs,
-		))
+				Match("Deployment", "bar", Namespace("wego-system"), GT(Field("spec", "replicas"), JoinField("foo", "spec", "replicas")))),
+			Actions(
+				func(args []interface{}) error {
+					foo := args[0]
+					bar := args[1]
+					fmt.Printf("FOO: %#v\n, BAR: %#v\n", foo, bar)
+					return nil
+				})).Instantiate(args)
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(rule.Fields["foo"][0]).Should(Equal("json_extract(foo.DATA, '$.spec.replicas')"))
+		Expect(rule.Fields["bar"][0]).Should(Equal("json_extract(bar.DATA, '$.spec.replicas')"))
+		Expect(rule.Queries[""].Insert).Should(Equal(fmt.Sprintf("INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(foo.ID, bar.ID) FROM resources foo, resources bar WHERE foo.KIND = 'Deployment' AND bar.KIND = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND json_extract(foo.DATA, '$.spec.replicas') < 2) AND ((bar.NAMESPACE = 'wego-system') AND json_extract(bar.DATA, '$.spec.replicas') > json_extract(foo.DATA, '$.spec.replicas'))", args.RuleIndex, args.Priority)))
+		Expect(rule.Queries["foo"].Insert).Should(Equal(fmt.Sprintf("CREATE TRIGGER foo_resources_%d AFTER INSERT ON resources WHEN NEW.KIND = 'Deployment' BEGIN INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(foo.ID, bar.ID) FROM resources foo, resources bar WHERE foo.KIND = 'Deployment' AND bar.KIND = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND json_extract(foo.DATA, '$.spec.replicas') < 2) AND ((bar.NAMESPACE = 'wego-system') AND json_extract(bar.DATA, '$.spec.replicas') > json_extract(foo.DATA, '$.spec.replicas')) AND foo.ID = NEW.ID; END", args.RuleIndex, args.RuleIndex, args.Priority)))
+		Expect(rule.Queries["bar"].Insert).Should(Equal(fmt.Sprintf("CREATE TRIGGER bar_resources_%d AFTER INSERT ON resources WHEN NEW.KIND = 'Deployment' BEGIN INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(foo.ID, bar.ID) FROM resources foo, resources bar WHERE foo.KIND = 'Deployment' AND bar.KIND = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND json_extract(foo.DATA, '$.spec.replicas') < 2) AND ((bar.NAMESPACE = 'wego-system') AND json_extract(bar.DATA, '$.spec.replicas') > json_extract(foo.DATA, '$.spec.replicas')) AND bar.ID = NEW.ID; END", args.RuleIndex, args.RuleIndex, args.Priority)))
+	})
+
+	It("processes an instantiation result set", func() {
+		e, err := NewTestEngine()
+		Expect(err).ShouldNot(HaveOccurred())
+		connections, err := getResourceInstantiationConnections(e.DB)
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(len(connections)).To(Equal(2))
+		err = e.AddResourceStringList([]string{`{"kind": "Ball", "namespace": "test", "name": "foo", "color": "red", "size": 10}`})
+		Expect(err).ShouldNot(HaveOccurred())
+		r, err := e.GetResource("Ball", "foo", "test")
+		Expect(err).ShouldNot(HaveOccurred())
+		var m map[string]interface{}
+		err = json.Unmarshal([]byte(r), &m)
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(m["color"]).To(Equal("red"))
+		connections, err = getResourceInstantiationConnections(e.DB)
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(len(connections)).To(Equal(0))
+		err = e.AddResourceStringList([]string{`{"kind": "Ball", "namespace": "test", "name": "foo", "color": "reddish", "size": 10}`})
+		r, err = e.GetResource("Ball", "foo", "test")
+		Expect(err).ShouldNot(HaveOccurred())
+		err = json.Unmarshal([]byte(r), &m)
+		Expect(err).ShouldNot(HaveOccurred())
+		Expect(m["color"]).To(Equal("reddish"))
+	})
 })
 
-var testData string = `insert into resources (kind, namespace, name, data) values ('Ball', 'test', 'foo', '{"kind": "Ball", "namespace": "test", "name": "foo", "color": "red", "size": 10}')
-insert into resources (kind, namespace, name, data) values ('Ball', 'test', 'bar', '{"kind": "Ball", "namespace": "test", "name": "bar", "color": "blue", "size": 20}')
-insert into resources (kind, namespace, name, data) values ('Cube', 'test', 'baz', '{"kind": "Cube", "namespace": "test", "name": "baz", "color": "blue", "size": 30}')
-insert into resources (kind, namespace, name, data) values ('Cube', 'test', 'quux', '{"kind": "Cube", "namespace": "test", "name": "quux", "color": "green", "size": 20}')
-insert into resources (kind, namespace, name, data) values ('Cube', 'test', 'derp', '{"kind": "Cube", "namespace": "test", "name": "baz", "color": "red", "size": 40}')
-insert into resources (kind, namespace, name, data) values ('Cylinder', 'test', 'wanda', '{"kind": "Cylinder", "namespace": "test", "name": "wanda", "color": "red", "size": 40}')
-insert into resources (kind, namespace, name, data) values ('Cylinder', 'test', 'groz', '{"kind": "Cylinder", "namespace": "test", "name": "groz", "color": "green", "size": 10}')
-insert into resources (kind, namespace, name, data) values ('Pyramid', 'test', 'foom', '{"kind": "Pyramid", "namespace": "test", "name": "foom", "color": "red", "size": 30}')
-insert into resources (kind, namespace, name, data) values ('Pyramid', 'test', 'gorp', '{"kind": "Pyramid", "namespace": "test", "name": "gorp", "color": "green", "size": 10}')`
+// var _ = Describe("Matcher Tests", func() {
+//  var args InstantiationArgs
+//  var count int
+//  //	emptyRefs := map[string]bool{}
+
+//  BeforeEach(func() {
+//      count = 0
+//      args = InstantiationArgs{
+//          Name:      "foo",
+//          RuleIndex: 0,
+//          Tables: map[string]string{
+//              "foo": "Resources",
+//          },
+//          gensymCount: &count,
+//      }
+//  })
+// DescribeTable("Simple Match Tests", func(me MatchExp, inst string, tables map[string]string, refs map[string]bool) {
+//  results, err := me.MatchGenerate().Instantiate(args)
+//  Expect(err).To(BeNil())
+//  Expect(results.Exp).To(Equal(inst))
+//  Expect(results.Tables).To(Equal(tables))
+// },
+//  Entry(
+//      "One table",
+//      Match("Deployment", "foo", Namespace("wego-system"), LT(Field("spec", "replicas"), Number(2))),
+//      "(foo.NAMESPACE = 'wego-system') AND (json_extract(foo.data, '$.spec.replicas') < 2)",
+//      map[string]string{"foo": "Resources"},
+//      emptyRefs,
+//  ))
+// DescribeTable("Conditions Tests", func(ce ConditionsExp, inst string, tables map[string]string, refs map[string]bool) {
+//  results, err := ce.ConditionsGenerate().Instantiate(args)
+//  Expect(err).To(BeNil())
+//  Expect(results.Exp).To(Equal(inst))
+//  Expect(results.Tables).To(Equal(tables))
+// },
+//  Entry(
+//      "Two tables",
+//      Conditions(
+//          Match("Deployment", "foo", Namespace("wego-system"), LT(Field("spec", "replicas"), Number(2))),
+//          Match("Deployment", "bar", Namespace("wego-system"), EQ(Field("spec", "replicas"), JoinField("foo", "spec", "replicas")))),
+//      `SELECT json_array(0, json_array(foo.ID, bar.ID, json("[]"))) FROM Resources foo JOIN Resources bar ON foo.Kind = 'Deployment' AND bar.Kind = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND (json_extract(foo.data, '$.spec.replicas') < 2)) AND ((bar.NAMESPACE = 'wego-system') AND (json_extract(bar.data, '$.spec.replicas') = json_extract(foo.data, '$.spec.replicas')))`,
+//      map[string]string{"foo": "Resources", "bar": "Resources"},
+//      emptyRefs,
+//  ))
+//})
+
+var testData string = `
+INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('Ball', 'foo', 'test', '{"kind": "Ball", "namespace": "test", "name": "foo", "color": "red", "size": 10}')
+INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('Ball', 'bar', 'test', '{"kind": "Ball", "namespace": "test", "name": "bar", "color": "blue", "size": 20}')
+INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('Cube', 'baz', 'test', '{"kind": "Cube", "namespace": "test", "name": "baz", "color": "blue", "size": 30}')
+INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('Cube', 'quux', 'test', '{"kind": "Cube", "namespace": "test", "name": "quux", "color": "green", "size": 20}')
+INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('Cube', 'razz', 'test', '{"kind": "Cube", "namespace": "test", "name": "baz", "color": "red", "size": 40}')
+INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('Cylinder', 'wanda', 'test', '{"kind": "Cylinder", "namespace": "test", "name": "wanda", "color": "red", "size": 40}')
+INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('Cylinder', 'groz', 'test', '{"kind": "Cylinder", "namespace": "test", "name": "groz", "color": "green", "size": 10}')
+INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('Pyramid', 'foom', 'test', '{"kind": "Pyramid", "namespace": "test", "name": "foom", "color": "red", "size": 30}')
+INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('Pyramid', 'gorp', 'test', '{"kind": "Pyramid", "namespace": "test", "name": "gorp", "color": "green", "size": 10}')
+INSERT INTO instantiations (ruleNum, resources) VALUES (0, json_array(1, 4))
+`
+
+func NewTestEngine() (*Engine, error) {
+	db, err := getTestDB()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Engine{DB: db, KeyFunction: defaultKeyFunc}, nil
+}
 
 func getTestDB() (*sql.DB, error) {
 	db, err := getDB()
 	Expect(err).To(BeNil())
 
 	entries := strings.Split(testData, "\n")
-	fmt.Printf("ENTRIES: %v, LEN: %d\n", entries, len(entries))
+	//	fmt.Printf("ENTRIES: %v, LEN: %d\n", entries, len(entries))
 
 	for _, entry := range entries {
+		if entry == "" {
+			continue
+		}
+
 		s, err := db.Prepare(entry)
 		fmt.Printf("ENTRY: %s\n", entry)
 		if err != nil {
@@ -407,4 +411,37 @@ func getTestDB() (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+type riEntry struct {
+	resourceID, instantiationID int
+}
+
+func deleteResource(db *sql.DB, id int) error {
+	stmt, err := db.Prepare("DELETE FROM resources WHERE ID = ?")
+	if err != nil {
+		return err
+	}
+
+	_, err = stmt.Exec(id)
+	return err
+}
+
+func getResourceInstantiationConnections(db *sql.DB) ([]riEntry, error) {
+	rows, err := db.Query("SELECT resource_ID, instantiation_ID FROM resource_instantiations")
+	defer rows.Close()
+	Expect(err).ShouldNot(HaveOccurred())
+
+	var entry riEntry
+
+	entries := []riEntry{}
+
+	for rows.Next() {
+		rows.Scan(&entry.resourceID, &entry.instantiationID)
+		entries = append(entries, entry)
+	}
+
+	rows.Close()
+
+	return entries, nil
 }

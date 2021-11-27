@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -41,18 +42,30 @@ var (
 type Table struct {
 	Name, BackingName string
 }
+
+type ActionFunc func(args []interface{}) error
+
 type InstantiationArgs struct {
-	Name          string
-	RuleIndex     int
-	KindsToTables map[string]string
-	Tables        map[string]string
-	gensymCount   *int
+	Name           string
+	RuleIndex      int
+	Priority       int
+	KindsToActions map[string]ActionFunc
+	Tables         map[string]string
+	gensymCount    *int
+}
+
+type Queries struct {
+	Insert, Update string
 }
 
 type InstantiationResults struct {
-	Exp    string
-	Refs   map[string]bool
-	Tables map[string]string
+	RuleIndex int
+	Priority  int
+	Exp       string
+	Refs      map[string]bool
+	Tables    map[string]string
+	Fields    map[string][]string
+	Queries   map[string]Queries
 }
 
 type Kind string
@@ -63,132 +76,87 @@ type RuleName string
 
 type RuleIndex int
 
-type InstantiationIndex int
+type KeyFunc func(jstr string) (string, string, string, error)
 
-type InstantiationPriority int
+func defaultKeyFunc(jstr string) (string, string, string, error) {
+	var res map[string]interface{}
 
-type Instantiation struct {
-	Priority             InstantiationPriority
-	InstantiationManager *InstantiationManager
-	Index                InstantiationIndex
-}
-
-type InstantiationManager struct {
-	Populated []*Instantiation
-	Free      []InstantiationIndex
-}
-
-type PriorityEntry struct {
-	Priority InstantiationPriority
-	Manager  *InstantiationManager
-}
-
-type PrioritizedInstantiationManager struct {
-	PriorityMap map[InstantiationPriority]int
-	Priorities  []PriorityEntry
-}
-
-func NewPrioritizedInstantiationManager() *PrioritizedInstantiationManager {
-	return &PrioritizedInstantiationManager{
-		PriorityMap: map[InstantiationPriority]int{},
-		Priorities:  []PriorityEntry{},
-	}
-}
-
-func (pim *PrioritizedInstantiationManager) AddInstantiation(inst *Instantiation) {
-	var im *InstantiationManager
-
-	priority := inst.Priority
-	pindex, ok := pim.PriorityMap[priority]
-
-	if ok {
-		im = pim.Priorities[pindex].Manager
-	} else {
-		im = &InstantiationManager{Populated: []*Instantiation{}, Free: []InstantiationIndex{}}
-
-		index := -1
-
-		for idx, entry := range pim.Priorities {
-			if entry.Priority > priority {
-				pim.Priorities = append(pim.Priorities[:idx+1], pim.Priorities[idx:]...)
-				pim.Priorities[idx] = PriorityEntry{Priority: priority, Manager: im}
-				index = idx
-				break
-			}
-		}
-
-		if index == -1 {
-			pim.PriorityMap[priority] = len(pim.Priorities)
-			pim.Priorities = append(pim.Priorities, PriorityEntry{Priority: priority, Manager: im})
-		} else {
-			pim.PriorityMap[priority] = index
-		}
+	if err := json.Unmarshal([]byte(jstr), &res); err != nil {
+		return "", "", "", err
 	}
 
-	im.AddInstantiation(inst)
-	// inst.InstantiationManager = im
-
-	// if len(im.Free) == 0 {
-	//  pop := im.Populated
-	//  inst.Index = InstantiationIndex(len(pop))
-	//  im.Populated = append(pop, inst)
-	// } else {
-	//  free := im.Free
-	//  last := len(free) - 1
-	//  inst.Index = free[last]
-	//  im.Free = free[0:last]
-	// }
-}
-
-func (pim *PrioritizedInstantiationManager) RemoveInstantiation(inst *Instantiation) {
-	im := inst.InstantiationManager
-
-	if im == nil {
-		return
-	}
-
-	im.Populated[inst.Index] = nil
-	im.Free = append(im.Free, inst.Index)
-
-	inst.InstantiationManager = nil
-	inst.Index = InstantiationIndex(-1)
-}
-
-func (im *InstantiationManager) AddInstantiation(inst *Instantiation) {
-	inst.InstantiationManager = im
-
-	if len(im.Free) == 0 {
-		pop := im.Populated
-		inst.Index = InstantiationIndex(len(pop))
-		im.Populated = append(pop, inst)
-	} else {
-		free := im.Free
-		last := len(free) - 1
-		inst.Index = free[last]
-		im.Free = free[0:last]
-	}
+	return res["kind"].(string), res["name"].(string), res["namespace"].(string), nil
 }
 
 type Engine struct {
-	Queries        map[Kind]Query
-	RuleCount      int
-	RuleIndices    map[RuleName]RuleIndex
-	Instantiations *InstantiationManager
+	DB          *sql.DB
+	RuleCount   int
+	KeyFunction KeyFunc
 }
 
-// func NewEngine() *Engine {
-//  return &Engine{RuleCount: 0, RuleIndices: map[string]int{}, TupleInstantiations: []map[ValueTupleKey][]Instantiation{}}
-// }
+func NewEngine() (*Engine, error) {
+	db, err := getDB()
+	if err != nil {
+		return nil, err
+	}
 
-// func (e *Engine) NewRule(ruleName string) {
-//  e.RuleIndices[ruleName] = e.RuleCount
-//  e.TupleInstantiations = append(e.TupleInstantiations, map[ValueTupleKey][]Instantiation{})
-//  e.RuleCount++
-// }
+	return &Engine{DB: db, KeyFunction: defaultKeyFunc}, nil
+}
 
-// func (v ValueTuple) Key() ValueTupleKey {
-//  return ValueTupleKey(fmt.Sprintf("%v", v))
-// }
+func (e *Engine) GetResource(kind, name, namespace string) (string, error) {
+	var id int
+	var data string
+
+	err := e.DB.QueryRow("SELECT ID, DATA FROM resources WHERE KIND = ? AND NAME = ? AND NAMESPACE = ?", kind, name, namespace).Scan(&id, &data)
+	if err != nil {
+		return "", err
+	}
+
+	//	fmt.Printf("ID: %d\n", id)
+	return data, nil
+}
+
+func (e *Engine) AddResourceList(resources ...interface{}) error {
+	rstrings := []string{}
+
+	for _, r := range resources {
+		jstr, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+
+		rstrings = append(rstrings, string(jstr))
+	}
+
+	return e.AddResourceStringList(rstrings)
+}
+
+const insertSQL = "INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET DATA = excluded.DATA"
+
+func (e *Engine) AddResourceStringList(resourceStrs []string) error {
+	tx, err := e.DB.Begin()
+	if err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare(insertSQL)
+
+	defer stmt.Close()
+
+	for _, rstr := range resourceStrs {
+		kind, name, namespace, err := e.KeyFunction(rstr)
+		if err != nil {
+			return err
+		}
+
+		_, err = stmt.Exec(kind, name, namespace, rstr)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
 
 func (i InstantiationArgs) PeekGensym() string {
 	return fmt.Sprintf("%s%d", i.Tables[i.Name], *i.gensymCount)
@@ -253,6 +221,18 @@ type TestExp interface {
 	TestGenerate() Instantiable
 }
 
+type ActionsVal struct {
+}
+
+type RuleVal struct {
+	Name       string
+	Priority   int
+	Actions    ActionFunc
+	Conditions ConditionsVal
+	Queries    map[string]Queries
+	Indices    []string
+}
+
 type AttributeVal struct {
 	Key   string
 	Value interface{}
@@ -270,6 +250,7 @@ type BoolVal struct {
 }
 
 type FieldVal struct {
+	Name string
 	Path []string
 }
 
@@ -324,7 +305,7 @@ type NamespaceVal struct {
 func (n NamespaceVal) TestGenerate() Instantiable {
 	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
 		return InstantiationResults{
-			Exp:    fmt.Sprintf("%s.Namespace = '%s'", args.Name, n.Name),
+			Exp:    fmt.Sprintf("%s.NAMESPACE = '%s'", args.Name, n.Name),
 			Tables: emptyTables,
 			Refs:   emptyRefs,
 		}, nil
@@ -347,6 +328,7 @@ func (n NumericBinaryTestVal) TestGenerate() Instantiable {
 			Exp:    fmt.Sprintf("%s %s %s", leftResults.Exp, n.Op, rightResults.Exp),
 			Refs:   mergeBoolMaps(leftResults.Refs, rightResults.Refs),
 			Tables: emptyTables,
+			Fields: mergeStringSliceMaps(leftResults.Fields, rightResults.Fields),
 		}, nil
 	}}
 }
@@ -367,6 +349,7 @@ func (c ComparableBinaryTestVal) TestGenerate() Instantiable {
 			Exp:    fmt.Sprintf("%s %s %s", leftResults.Exp, c.Op, rightResults.Exp),
 			Refs:   mergeBoolMaps(leftResults.Refs, rightResults.Refs),
 			Tables: emptyTables,
+			Fields: mergeStringSliceMaps(leftResults.Fields, rightResults.Fields),
 		}, nil
 	}}
 }
@@ -387,6 +370,7 @@ func (t TestBinaryTestVal) TestGenerate() Instantiable {
 			Exp:    fmt.Sprintf("(%s) %s (%s)", leftResults.Exp, t.Op, rightResults.Exp),
 			Refs:   mergeBoolMaps(leftResults.Refs, rightResults.Refs),
 			Tables: emptyTables,
+			Fields: mergeStringSliceMaps(leftResults.Fields, rightResults.Fields),
 		}, nil
 	}}
 }
@@ -561,14 +545,65 @@ func Match(kind, name string, tests ...TestExp) MatchVal {
 	return MatchVal{Kind: kind, Name: name, Tests: testVals}
 }
 
-func Conditions(matchVals ...MatchVal) ConditionsVal {
+type RuleArg func(rv *RuleVal)
+
+func Name(n string) RuleArg {
+	return func(rv *RuleVal) {
+		rv.Name = n
+	}
+}
+
+func Priority(n int) RuleArg {
+	return func(rv *RuleVal) {
+		rv.Priority = n
+	}
+}
+
+func Rule(args ...RuleArg) RuleVal {
+	var rv RuleVal
+
+	for _, arg := range args {
+		arg(&rv)
+	}
+
+	return rv
+}
+
+func (r RuleVal) Instantiate(args InstantiationArgs) (InstantiationResults, error) {
+	cres, err := r.Conditions.ConditionsGenerate().Instantiate(args)
+	if err != nil {
+		return InstantiationResults{}, nil
+	}
+
+	res := cres
+	res.Queries = map[string]Queries{}
+	res.Queries[""] = Queries{Insert: cres.Exp}
+	fmt.Printf("\nGEN: %s\n", cres.Exp)
+
+	for _, mv := range r.Conditions.MatchVals {
+		n := mv.Name
+		res.Queries[n] = Queries{Insert: fmt.Sprintf("CREATE TRIGGER %s_resources_%d AFTER INSERT ON resources WHEN NEW.KIND = '%s' BEGIN %s AND %s.ID = NEW.ID; END", n, args.RuleIndex, mv.Kind, cres.Exp, n)}
+	}
+
+	return res, nil
+}
+
+func Actions(rhs ActionFunc) RuleArg {
+	return func(rv *RuleVal) {
+		rv.Actions = rhs
+	}
+}
+
+func Conditions(matchVals ...MatchVal) RuleArg {
 	matches := []Instantiable{}
 
 	for _, match := range matchVals {
 		matches = append(matches, match.MatchGenerate())
 	}
 
-	return ConditionsVal{MatchVals: matchVals, Matches: matches}
+	return func(rv *RuleVal) {
+		rv.Conditions = ConditionsVal{MatchVals: matchVals, Matches: matches}
+	}
 }
 
 func (m MatchVal) MatchGenerate() Instantiable {
@@ -583,7 +618,6 @@ func (m MatchVal) MatchGenerate() Instantiable {
 
 		targs := args
 		targs.Name = m.Name
-		targs.Tables = map[string]string{m.Name: getTableForKind(args, m.Kind)}
 
 		inst, err := m.Tests[0].Instantiate(targs)
 		if err != nil {
@@ -592,7 +626,8 @@ func (m MatchVal) MatchGenerate() Instantiable {
 
 		testExp := inst.Exp
 		refs := inst.Refs
-		tables := mergeStringMaps(map[string]string{args.Name: "Resources"}, targs.Tables)
+		tables := inst.Tables
+		fields := inst.Fields
 
 		for _, test := range m.Tests[1:] {
 			inst, err := test.Instantiate(targs)
@@ -600,26 +635,28 @@ func (m MatchVal) MatchGenerate() Instantiable {
 				return InstantiationResults{}, err
 			}
 
-			testExp = fmt.Sprintf("(%s) AND (%s)", testExp, inst.Exp)
+			testExp = fmt.Sprintf("(%s) AND %s", testExp, inst.Exp)
 			refs = mergeBoolMaps(refs, inst.Refs)
 			tables = mergeStringMaps(tables, inst.Tables)
+			fields = mergeStringSliceMaps(fields, inst.Fields)
 		}
 
 		return InstantiationResults{
 			Exp:    testExp,
 			Refs:   refs,
 			Tables: tables,
+			Fields: fields,
 		}, nil
 	}}
 }
 
-func getTableForKind(args InstantiationArgs, kind string) string {
-	if tab, ok := args.KindsToTables[kind]; ok {
-		return tab
-	}
+// func getTableForKind(args InstantiationArgs, kind string) string {
+//  if tab, ok := args.KindsToTables[kind]; ok {
+//      return tab
+//  }
 
-	return args.KindsToTables["*"]
-}
+//  return args.KindsToTables["*"]
+// }
 
 func (c ConditionsVal) ConditionsGenerate() Instantiable {
 	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
@@ -639,6 +676,7 @@ func (c ConditionsVal) ConditionsGenerate() Instantiable {
 		matchExp := inst.Exp
 		refs := inst.Refs
 		tables := inst.Tables
+		fields := inst.Fields
 
 		for _, match := range c.Matches[1:] {
 			inst, err := match.Instantiate(args)
@@ -649,31 +687,33 @@ func (c ConditionsVal) ConditionsGenerate() Instantiable {
 			matchExp = fmt.Sprintf("(%s) AND (%s)", matchExp, inst.Exp)
 			refs = mergeBoolMaps(refs, inst.Refs)
 			tables = mergeStringMaps(tables, inst.Tables)
+			fields = mergeStringSliceMaps(fields, inst.Fields)
 		}
 
 		return InstantiationResults{
-			Exp:    selectExp(0, tables, c.MatchVals, matchExp),
+			Exp:    selectExp(args.RuleIndex, args.Priority, tables, c.MatchVals, matchExp),
 			Refs:   refs,
 			Tables: tables,
+			Fields: fields,
 		}, nil
 	}}
 }
 
-func selectExp(ruleIndex int, tableMap map[string]string, matches []MatchVal, matchExp string) string {
+func selectExp(ruleIndex, priority int, tableMap map[string]string, matches []MatchVal, matchExp string) string {
 	var tables strings.Builder
 
-	tables.WriteString(fmt.Sprintf(" FROM %s %s", tableMap[matches[0].Name], matches[0].Name))
+	tables.WriteString(fmt.Sprintf(" FROM resources %s", matches[0].Name))
 
 	for _, match := range matches[1:] {
-		tables.WriteString(fmt.Sprintf(" JOIN %s %s", tableMap[match.Name], match.Name))
+		tables.WriteString(fmt.Sprintf(", resources %s", match.Name))
 	}
 
 	var kinds strings.Builder
 
-	kinds.WriteString(fmt.Sprintf(" ON %s.Kind = '%s'", matches[0].Name, matches[0].Kind))
+	kinds.WriteString(fmt.Sprintf(" WHERE %s.KIND = '%s'", matches[0].Name, matches[0].Kind))
 
 	for _, match := range matches[1:] {
-		kinds.WriteString(fmt.Sprintf(" AND %s.Kind = '%s'", match.Name, match.Kind))
+		kinds.WriteString(fmt.Sprintf(" AND %s.KIND = '%s'", match.Name, match.Kind))
 	}
 
 	var args strings.Builder
@@ -684,7 +724,7 @@ func selectExp(ruleIndex int, tableMap map[string]string, matches []MatchVal, ma
 		args.WriteString(fmt.Sprintf(", %s.ID", match.Name))
 	}
 
-	return fmt.Sprintf(`SELECT json_array(%d, json_array(%s, json("[]")))%s%s AND %s`, ruleIndex, args.String(), tables.String(), kinds.String(), matchExp)
+	return fmt.Sprintf(`INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(%s)%s%s AND %s`, ruleIndex, priority, args.String(), tables.String(), kinds.String(), matchExp)
 }
 
 func (o ObjectVal) IterableObjectGenerate() Instantiable {
@@ -743,11 +783,16 @@ func (a ArrayVal) IterableKeyGenerate() Instantiable {
 }
 
 func (f FieldVal) NumericGenerate() Instantiable {
+	path := strings.Join(f.Path, ".")
+
 	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
+		exp := fmt.Sprintf("json_extract(%s.DATA, '$.%s')", args.Name, path)
+
 		return InstantiationResults{
-			Exp:    fmt.Sprintf("json_extract(%s.data, '$.%s')", args.Name, strings.Join(f.Path, ".")),
+			Exp:    exp,
 			Refs:   emptyRefs,
 			Tables: emptyTables,
+			Fields: map[string][]string{args.Name: []string{exp}},
 		}, nil
 	},
 	}
@@ -764,10 +809,11 @@ func (f FieldVal) IterableValueGenerate() Instantiable {
 		eachName := args.NamedGensym("each")
 
 		return InstantiationResults{
-			Exp: fmt.Sprintf("select %s.value from %s %s, json_each(%s.data, '$.%s') %s where %s.id = %s.id",
+			Exp: fmt.Sprintf("select %s.value from %s %s, json_each(%s.DATA, '$.%s') %s where %s.id = %s.id",
 				eachName, baseTableName, name, name, strings.Join(f.Path, "."), eachName, name, baseTableName),
 			Refs:   emptyRefs,
 			Tables: emptyTables,
+			Fields: map[string][]string{},
 		}, nil
 	},
 	}
@@ -780,10 +826,11 @@ func (f FieldVal) IterableKeyGenerate() Instantiable {
 		eachName := args.NamedGensym("each")
 
 		return InstantiationResults{
-			Exp: fmt.Sprintf("select %s.key from %s %s, json_each(%s.data, '$.%s') %s where %s.id = %s.id",
+			Exp: fmt.Sprintf("select %s.key from %s %s, json_each(%s.DATA, '$.%s') %s where %s.id = %s.id",
 				eachName, baseTableName, name, name, strings.Join(f.Path, "."), eachName, name, baseTableName),
 			Refs:   emptyRefs,
 			Tables: emptyTables,
+			Fields: map[string][]string{},
 		}, nil
 	},
 	}
@@ -796,10 +843,11 @@ func (f FieldVal) IterableObjectGenerate() Instantiable {
 		eachName := args.NamedGensym("each")
 
 		return InstantiationResults{
-			Exp: fmt.Sprintf("select json_object(%s.key, %s.value) from %s %s, json_each(%s.data, '$.%s') %s where %s.id = %s.id",
+			Exp: fmt.Sprintf("select json_object(%s.key, %s.value) from %s %s, json_each(%s.DATA, '$.%s') %s where %s.id = %s.id",
 				eachName, eachName, baseTableName, name, name, strings.Join(f.Path, "."), eachName, name, baseTableName),
 			Refs:   emptyRefs,
 			Tables: emptyTables,
+			Fields: map[string][]string{},
 		}, nil
 	},
 	}
@@ -808,9 +856,10 @@ func (f FieldVal) IterableObjectGenerate() Instantiable {
 func (j JoinFieldVal) NumericGenerate() Instantiable {
 	return Instantiable{InstFunc: func(args InstantiationArgs) (InstantiationResults, error) {
 		return InstantiationResults{
-			Exp:    fmt.Sprintf("json_extract(%s.data, '$.%s')", j.Name, strings.Join(j.Path, ".")),
+			Exp:    fmt.Sprintf("json_extract(%s.DATA, '$.%s')", j.Name, strings.Join(j.Path, ".")),
 			Refs:   map[string]bool{j.Name: true},
 			Tables: emptyTables,
+			Fields: map[string][]string{},
 		}, nil
 	},
 	}
@@ -827,7 +876,7 @@ func (j JoinFieldVal) IterableValueGenerate() Instantiable {
 		eachName := args.NamedGensym("each")
 
 		return InstantiationResults{
-			Exp: fmt.Sprintf("select %s.value from %s %s, json_each(%s.data, '$.%s') %s where %s.id = %s.id",
+			Exp: fmt.Sprintf("select %s.value from %s %s, json_each(%s.DATA, '$.%s') %s where %s.id = %s.id",
 				eachName, baseTableName, name, name, strings.Join(j.Path, "."), eachName, name, baseTableName),
 			Refs:   emptyRefs,
 			Tables: emptyTables,
@@ -843,10 +892,11 @@ func (j JoinFieldVal) IterableKeyGenerate() Instantiable {
 		eachName := args.NamedGensym("each")
 
 		return InstantiationResults{
-			Exp: fmt.Sprintf("select %s.key from %s %s, json_each(%s.data, '$.%s') %s where %s.id = %s.id",
+			Exp: fmt.Sprintf("select %s.key from %s %s, json_each(%s.DATA, '$.%s') %s where %s.id = %s.id",
 				eachName, baseTableName, name, name, strings.Join(j.Path, "."), eachName, name, baseTableName),
 			Refs:   emptyRefs,
 			Tables: emptyTables,
+			Fields: map[string][]string{},
 		}, nil
 	},
 	}
@@ -859,10 +909,11 @@ func (j JoinFieldVal) IterableObjectGenerate() Instantiable {
 		eachName := args.NamedGensym("each")
 
 		return InstantiationResults{
-			Exp: fmt.Sprintf("select json_object(%s.key, %s.value) from %s %s, json_each(%s.data, '$.%s') %s where %s.id = %s.id",
+			Exp: fmt.Sprintf("select json_object(%s.key, %s.value) from %s %s, json_each(%s.DATA, '$.%s') %s where %s.id = %s.id",
 				eachName, eachName, baseTableName, name, name, strings.Join(j.Path, "."), eachName, name, baseTableName),
 			Refs:   emptyRefs,
 			Tables: emptyTables,
+			Fields: map[string][]string{},
 		}, nil
 	},
 	}
@@ -916,6 +967,20 @@ func mergeStringMaps(m1, m2 map[string]string) map[string]string {
 	return m3
 }
 
+func mergeStringSliceMaps(m1, m2 map[string][]string) map[string][]string {
+	m3 := map[string][]string{}
+
+	for k, v := range m1 {
+		m3[k] = v
+	}
+
+	for k, v := range m2 {
+		m3[k] = v
+	}
+
+	return m3
+}
+
 /*
 func init() {
     Rule("rule1",
@@ -926,12 +991,12 @@ func init() {
             Modify("dep", Field("spec", "replicas"), 2)))
 }
 
-baz.y.q CONTAINS bar.x = NOT(EXISTS(SELECT(true FROM bar, json_each(bar.data, '$.x') j1 WHERE bar.ID = <BAR ID> AND j1.value NOT IN(SELECT j2.value FROM baz, json_each(baz.data, '$.y.q') WHERE baz.ID = <BAZ ID>)
+baz.y.q CONTAINS bar.x = NOT(EXISTS(SELECT(true FROM bar, json_each(bar.DATA, '$.x') j1 WHERE bar.ID = <BAR ID> AND j1.value NOT IN(SELECT j2.value FROM baz, json_each(baz.DATA, '$.y.q') WHERE baz.ID = <BAZ ID>)
 func Rule(name string, query ruleQuery, actions ...action) error {
     rule :=
         Rule{
             priority: defaultPriority,
-            query:    query, // `SELECT key, data FROM Resources WHERE kind = 'Deployment' AND namespace = 'my-controller' AND json_extract(Resources, '$.spec.replicas') < 2`,
+            query:    query, // `SELECT key, DATA FROM Resources WHERE kind = 'Deployment' AND NAMESPACE = 'my-controller' AND json_extract(Resources, '$.spec.replicas') < 2`,
             operation: func(objs map[string]map[string]interface{}) error {
                 for action, _ := range actions {
                     if err := action(objs); err != nil {
