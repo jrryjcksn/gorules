@@ -17,49 +17,52 @@ var _ = Describe("Simple Expression Tests", func() {
 		return emptyRefs
 	}
 
-	var args InstantiationArgs
-	var count int
+	var args *InstantiationData
 
 	BeforeEach(func() {
-		count = 0
-		args = InstantiationArgs{
-			Name: "obj",
+		args = &InstantiationData{
+			Names:   []string{"obj", "otherObject", "yetAnotherObject"},
+			Queries: map[string]Queries{},
+			Refs:    map[string]bool{},
+			//			FieldChecks: map[string]map[string]bool{},
 			Tables: map[string]string{
 				"obj":              "objtab",
 				"otherObject":      "otherObjTab",
 				"yetAnotherObject": "yetAnotherObjTab",
 			},
-			gensymCount: &count,
 		}
 	})
 
-	DescribeTable("Rule Expression Numeric Value Tests", func(nve NumericValueExp, inst func() string, refs map[string]bool) {
-		results, err := nve.NumericGenerate().Instantiate(args)
+	DescribeTable("Rule Expression Numeric Value Tests", func(nve NumericValueExp, inst func() string, refs map[string]bool, idx int) {
+		results, err := nve.NumericGenerate().Instantiate(args, idx)
 		Expect(err).To(BeNil())
-		Expect(results.Exp).To(Equal(inst()))
-		Expect(results.Refs).To(Equal(refs))
+		Expect(results).To(Equal(inst()))
+		Expect(args.Refs).To(Equal(refs))
 	},
 		Entry(
 			"Test simple number",
 			Number(6),
 			func() string { return "6" },
-			emptyRefs),
+			emptyRefs,
+			0),
 		Entry(
 			"Test simple field",
 			Field("foo", "bar"),
-			func() string { return fmt.Sprintf("json_extract(%s.DATA, '$.foo.bar')", args.Name) },
-			emptyRefs),
+			func() string { return fmt.Sprintf("json_extract(%s.DATA, '$.foo.bar')", args.Names[0]) },
+			emptyRefs,
+			0),
 		Entry(
 			"Test join field",
 			JoinField("otherObject", "foo", "bar"),
 			func() string { return "json_extract(otherObject.DATA, '$.foo.bar')" },
-			map[string]bool{"otherObject": true}))
+			map[string]bool{"otherObject": true},
+			1))
 
 	DescribeTable("Rule Expression Comparable Value Tests", func(cve ComparableValueExp, inst func() string, refs map[string]bool) {
-		results, err := cve.ComparableGenerate().Instantiate(args)
+		results, err := cve.ComparableGenerate().Instantiate(args, 0)
 		Expect(err).To(BeNil())
-		Expect(results.Exp).To(Equal(inst()))
-		Expect(results.Refs).To(Equal(refs))
+		Expect(results).To(Equal(inst()))
+		Expect(args.Refs).To(Equal(refs))
 	},
 		Entry(
 			"Test simple number",
@@ -69,7 +72,7 @@ var _ = Describe("Simple Expression Tests", func() {
 		Entry(
 			"Test simple field",
 			Field("foo", "bar"),
-			func() string { return fmt.Sprintf("json_extract(%s.DATA, '$.foo.bar')", args.Name) },
+			func() string { return fmt.Sprintf("json_extract(%s.DATA, '$.foo.bar')", args.Names[0]) },
 			emptyRefs),
 		Entry(
 			"Test join field",
@@ -82,19 +85,19 @@ var _ = Describe("Simple Expression Tests", func() {
 			func() string { return "'a string'" },
 			emptyRefs))
 
-	DescribeTable("Rule Expression Iterated Value Tests", func(ive IterableValueExp, inst func() string, refs map[string]bool, tables map[string]string) {
-		results, err := ive.IterableValueGenerate().Instantiate(args)
+	DescribeTable("Rule Expression Iterated Value Tests", func(ive IterableValueExp, inst func() string, refs map[string]bool, tables map[string]string, idx int) {
+		results, err := ive.IterableValueGenerate().Instantiate(args, idx)
 		Expect(err).To(BeNil())
-		Expect(results.Exp).To(Equal(inst()))
-		Expect(results.Refs).To(Equal(refs))
-		Expect(results.Tables).To(Equal(tables))
+		Expect(results).To(Equal(inst()))
+		Expect(args.Refs).To(Equal(refs))
 	},
 		Entry(
 			"Test json array constant",
 			Array(String("foo"), Number(6), Bool(true)),
 			func() string { return `select value from json_each('["foo",6,true]')` },
 			emptyRefs,
-			emptyTables),
+			emptyTables,
+			0),
 		Entry(
 			"Test Iterable Field",
 			Field("foo", "bar"),
@@ -102,7 +105,8 @@ var _ = Describe("Simple Expression Tests", func() {
 				return `select each1.value from objtab objtab0, json_each(objtab0.DATA, '$.foo.bar') each1 where objtab0.id = objtab.id`
 			},
 			emptyRefs,
-			emptyTables),
+			emptyTables,
+			0),
 		Entry(
 			"Test Iterable Join Field",
 			JoinField("otherObject", "foo", "bar"),
@@ -110,21 +114,22 @@ var _ = Describe("Simple Expression Tests", func() {
 				return `select each1.value from otherObjTab otherObjTab0, json_each(otherObjTab0.DATA, '$.foo.bar') each1 where otherObjTab0.id = otherObjTab.id`
 			},
 			emptyRefs,
-			emptyTables))
+			emptyTables,
+			1))
 
-	DescribeTable("Rule Expression Iterated Key Tests", func(ike IterableKeyExp, inst func() string, refs map[string]bool, tables map[string]string) {
-		results, err := ike.IterableKeyGenerate().Instantiate(args)
+	DescribeTable("Rule Expression Iterated Key Tests", func(ike IterableKeyExp, inst func() string, refs map[string]bool, tables map[string]string, idx int) {
+		results, err := ike.IterableKeyGenerate().Instantiate(args, idx)
 		Expect(err).To(BeNil())
-		Expect(results.Exp).To(Equal(inst()))
-		Expect(results.Refs).To(Equal(refs))
-		Expect(results.Tables).To(Equal(tables))
+		Expect(results).To(Equal(inst()))
+		Expect(args.Refs).To(Equal(refs))
 	},
 		Entry(
 			"Test json array constant",
 			Array(String("foo"), Number(6), Bool(true)),
 			func() string { return `select key from json_each('["foo",6,true]')` },
 			emptyRefs,
-			emptyTables),
+			emptyTables,
+			0),
 		Entry(
 			"Test Iterable Field",
 			Field("foo", "bar"),
@@ -132,7 +137,8 @@ var _ = Describe("Simple Expression Tests", func() {
 				return `select each1.key from objtab objtab0, json_each(objtab0.DATA, '$.foo.bar') each1 where objtab0.id = objtab.id`
 			},
 			emptyRefs,
-			emptyTables),
+			emptyTables,
+			0),
 		Entry(
 			"Test Iterable Join Field",
 			JoinField("otherObject", "foo", "bar"),
@@ -140,14 +146,14 @@ var _ = Describe("Simple Expression Tests", func() {
 				return `select each1.key from otherObjTab otherObjTab0, json_each(otherObjTab0.DATA, '$.foo.bar') each1 where otherObjTab0.id = otherObjTab.id`
 			},
 			emptyRefs,
-			emptyTables))
+			emptyTables,
+			1))
 
-	DescribeTable("Rule Expression Iterated Object Tests", func(ioe IterableObjectExp, inst func() string, refs map[string]bool, tables map[string]string) {
-		results, err := ioe.IterableObjectGenerate().Instantiate(args)
+	DescribeTable("Rule Expression Iterated Object Tests", func(ioe IterableObjectExp, inst func() string, refs map[string]bool, tables map[string]string, idx int) {
+		results, err := ioe.IterableObjectGenerate().Instantiate(args, idx)
 		Expect(err).To(BeNil())
-		Expect(results.Exp).To(Equal(inst()))
-		Expect(results.Refs).To(Equal(refs))
-		Expect(results.Tables).To(Equal(tables))
+		Expect(results).To(Equal(inst()))
+		Expect(args.Refs).To(Equal(refs))
 	},
 		Entry(
 			"Test json object constant",
@@ -156,7 +162,8 @@ var _ = Describe("Simple Expression Tests", func() {
 				return `select json_object(key, value) from json_each('{"bar":"yow","baz":true,"foo":4}')`
 			},
 			emptyRefs,
-			emptyTables),
+			emptyTables,
+			0),
 		Entry(
 			"Test Iterable Field",
 			Field("foo", "bar"),
@@ -164,7 +171,8 @@ var _ = Describe("Simple Expression Tests", func() {
 				return `select json_object(each1.key, each1.value) from objtab objtab0, json_each(objtab0.DATA, '$.foo.bar') each1 where objtab0.id = objtab.id`
 			},
 			emptyRefs,
-			emptyTables),
+			emptyTables,
+			0),
 		Entry(
 			"Test Iterable Join Field",
 			JoinField("otherObject", "foo", "bar"),
@@ -172,23 +180,24 @@ var _ = Describe("Simple Expression Tests", func() {
 				return `select json_object(each1.key, each1.value) from otherObjTab otherObjTab0, json_each(otherObjTab0.DATA, '$.foo.bar') each1 where otherObjTab0.id = otherObjTab.id`
 			},
 			emptyRefs,
-			emptyTables))
+			emptyTables,
+			1))
 
 	DescribeTable("Rule Expression Comparison Tests", func(testExp TestExp, inst func() string, refs func() map[string]bool) {
-		results, err := testExp.TestGenerate().Instantiate(args)
+		results, err := testExp.TestGenerate().Instantiate(args, 0)
 		Expect(err).To(BeNil())
-		Expect(results.Exp).To(Equal(inst()))
-		Expect(results.Refs).To(Equal(refs()))
+		Expect(results).To(Equal(inst()))
+		Expect(args.Refs).To(Equal(refs()))
 	},
 		Entry(
 			"Test less than",
 			LT(Number(6), Field("foo", "bar")),
-			func() string { return fmt.Sprintf("6 < json_extract(%s.DATA, '$.foo.bar')", args.Name) },
+			func() string { return fmt.Sprintf("6 < json_extract(%s.DATA, '$.foo.bar')", args.Names[0]) },
 			emptyRefFunc),
 		Entry(
 			"Test less than or equal",
 			LE(Number(6), Field("foo", "bar")),
-			func() string { return fmt.Sprintf("6 <= json_extract(%s.DATA, '$.foo.bar')", args.Name) },
+			func() string { return fmt.Sprintf("6 <= json_extract(%s.DATA, '$.foo.bar')", args.Names[0]) },
 			emptyRefFunc),
 		Entry(
 			"Test greater than",
@@ -232,17 +241,18 @@ var _ = Describe("Simple Expression Tests", func() {
 			func() string { return "true <> json_extract(otherObject.DATA, '$.foo.bar')" },
 			func() map[string]bool { return map[string]bool{"otherObject": true} }))
 	DescribeTable("AND, OR and NOT", func(testExp TestExp, inst func() string, refs func() map[string]bool) {
-		results, err := testExp.TestGenerate().Instantiate(args)
+		fmt.Printf("X: %#v\n", args)
+		results, err := testExp.TestGenerate().Instantiate(args, 0)
 		Expect(err).To(BeNil())
-		Expect(results.Exp).To(Equal(inst()))
-		Expect(results.Refs).To(Equal(refs()))
+		Expect(results).To(Equal(inst()))
+		Expect(args.Refs).To(Equal(refs()))
 	},
 		Entry(
 			"Test AND",
 			AND(LT(Number(6), Field("foo", "bar")), GT(Number(6), JoinField("otherObject", "foo", "bar"))),
 			func() string {
 				return fmt.Sprintf("(6 < json_extract(%s.DATA, '$.foo.bar')) AND (6 > json_extract(otherObject.DATA, '$.foo.bar'))",
-					args.Name)
+					args.Names[0])
 			},
 			func() map[string]bool { return map[string]bool{"otherObject": true} }),
 		Entry(
@@ -262,17 +272,21 @@ var _ = Describe("Simple Expression Tests", func() {
 })
 
 var _ = Describe("Rule Tests", func() {
-	var args InstantiationArgs
+	var args *InstantiationData
 
 	BeforeEach(func() {
-		args = InstantiationArgs{
+		args = &InstantiationData{
+			Names:   []string{"foo", "bar"},
+			Queries: map[string]Queries{},
+			Refs:    map[string]bool{},
+			//			FieldChecks: map[string]map[string]bool{},
 			RuleIndex: 20,
 			Priority:  10,
 		}
 	})
 
 	It("generates the correct queries and indices", func() {
-		rule, err := Rule(
+		_, err := Rule(
 			Name("rule1"),
 			Conditions(
 				Match("Deployment", "foo", Namespace("wego-system"), LT(Field("spec", "replicas"), Number(2))),
@@ -283,13 +297,13 @@ var _ = Describe("Rule Tests", func() {
 					bar := args[1]
 					fmt.Printf("FOO: %#v\n, BAR: %#v\n", foo, bar)
 					return nil
-				})).Instantiate(args)
+				})).Instantiate(args, 0)
 		Expect(err).ShouldNot(HaveOccurred())
-		Expect(rule.Fields["foo"][0]).Should(Equal("json_extract(foo.DATA, '$.spec.replicas')"))
-		Expect(rule.Fields["bar"][0]).Should(Equal("json_extract(bar.DATA, '$.spec.replicas')"))
-		Expect(rule.Queries[""].Insert).Should(Equal(fmt.Sprintf("INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(foo.ID, bar.ID) FROM resources foo, resources bar WHERE foo.KIND = 'Deployment' AND bar.KIND = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND json_extract(foo.DATA, '$.spec.replicas') < 2) AND ((bar.NAMESPACE = 'wego-system') AND json_extract(bar.DATA, '$.spec.replicas') > json_extract(foo.DATA, '$.spec.replicas'))", args.RuleIndex, args.Priority)))
-		Expect(rule.Queries["foo"].Insert).Should(Equal(fmt.Sprintf("CREATE TRIGGER foo_resources_%d AFTER INSERT ON resources WHEN NEW.KIND = 'Deployment' BEGIN INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(foo.ID, bar.ID) FROM resources foo, resources bar WHERE foo.KIND = 'Deployment' AND bar.KIND = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND json_extract(foo.DATA, '$.spec.replicas') < 2) AND ((bar.NAMESPACE = 'wego-system') AND json_extract(bar.DATA, '$.spec.replicas') > json_extract(foo.DATA, '$.spec.replicas')) AND foo.ID = NEW.ID; END", args.RuleIndex, args.RuleIndex, args.Priority)))
-		Expect(rule.Queries["bar"].Insert).Should(Equal(fmt.Sprintf("CREATE TRIGGER bar_resources_%d AFTER INSERT ON resources WHEN NEW.KIND = 'Deployment' BEGIN INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(foo.ID, bar.ID) FROM resources foo, resources bar WHERE foo.KIND = 'Deployment' AND bar.KIND = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND json_extract(foo.DATA, '$.spec.replicas') < 2) AND ((bar.NAMESPACE = 'wego-system') AND json_extract(bar.DATA, '$.spec.replicas') > json_extract(foo.DATA, '$.spec.replicas')) AND bar.ID = NEW.ID; END", args.RuleIndex, args.RuleIndex, args.Priority)))
+		//		Expect(args.FieldChecks["foo"]).Should(HaveKey("json_extract(NEW.DATA, '$.spec.replicas') <> json_extract(OLD.DATA, '$.spec.replicas')"))
+		//		Expect(args.FieldChecks["bar"]).Should(HaveKey("json_extract(NEW.DATA, '$.spec.replicas') <> json_extract(OLD.DATA, '$.spec.replicas')"))
+		Expect(args.Queries[""].Insert).Should(Equal(fmt.Sprintf("INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(foo.ID, bar.ID) FROM resources foo, resources bar WHERE foo.KIND = 'Deployment' AND bar.KIND = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND json_extract(foo.DATA, '$.spec.replicas') < 2) AND ((bar.NAMESPACE = 'wego-system') AND json_extract(bar.DATA, '$.spec.replicas') > json_extract(foo.DATA, '$.spec.replicas'))", args.RuleIndex, args.Priority)))
+		Expect(args.Queries["foo"].Insert).Should(Equal(fmt.Sprintf("CREATE TRIGGER foo_resources_%d AFTER INSERT ON resources WHEN NEW.KIND = 'Deployment' BEGIN INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(foo.ID, bar.ID) FROM resources foo, resources bar WHERE foo.KIND = 'Deployment' AND bar.KIND = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND json_extract(foo.DATA, '$.spec.replicas') < 2) AND ((bar.NAMESPACE = 'wego-system') AND json_extract(bar.DATA, '$.spec.replicas') > json_extract(foo.DATA, '$.spec.replicas')) AND foo.ID = NEW.ID; END", args.RuleIndex, args.RuleIndex, args.Priority)))
+		Expect(args.Queries["bar"].Insert).Should(Equal(fmt.Sprintf("CREATE TRIGGER bar_resources_%d AFTER INSERT ON resources WHEN NEW.KIND = 'Deployment' BEGIN INSERT INTO instantiations (ruleNum, priority, resources) SELECT %d, %d, json_array(foo.ID, bar.ID) FROM resources foo, resources bar WHERE foo.KIND = 'Deployment' AND bar.KIND = 'Deployment' AND ((foo.NAMESPACE = 'wego-system') AND json_extract(foo.DATA, '$.spec.replicas') < 2) AND ((bar.NAMESPACE = 'wego-system') AND json_extract(bar.DATA, '$.spec.replicas') > json_extract(foo.DATA, '$.spec.replicas')) AND bar.ID = NEW.ID; END", args.RuleIndex, args.RuleIndex, args.Priority)))
 	})
 
 	It("processes an instantiation result set", func() {

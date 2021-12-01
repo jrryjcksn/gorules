@@ -12,7 +12,7 @@ CREATE TABLE instantiations (ID INTEGER PRIMARY KEY, ruleNum INTEGER NOT NULL, p
 CREATE TRIGGER instantiation_expansion_TRIGGER AFTER INSERT ON instantiations BEGIN UPDATE instantiations SET timestamp = time('now', 'unixepoch') WHERE ID = NEW.ID; END
 CREATE TRIGGER instantiation_connection_TRIGGER AFTER INSERT ON instantiations BEGIN INSERT INTO resource_instantiations SELECT value, NEW.ID FROM json_each(NEW.resources); END
 CREATE TRIGGER instantiation_delete_TRIGGER AFTER DELETE ON instantiations BEGIN DELETE FROM resource_instantiations WHERE instantiation_ID = OLD.ID; END
-
+CREATE INDEX instantiation_priority_INDEX ON instantiations (priority, timestamp, active)
 CREATE TABLE resource_instantiations (resource_ID INTEGER NOT NULL, instantiation_ID INTEGER NOT NULL)
 CREATE INDEX resource_instantiations_INDEX ON resource_instantiations (resource_ID)
 CREATE INDEX instantiation_resources_INDEX ON resource_instantiations (instantiation_ID, resource_ID)
@@ -26,8 +26,12 @@ CREATE TRIGGER resource_delete_TRIGGER AFTER DELETE ON resources BEGIN DELETE FR
 CREATE TABLE configuration (name TEXT PRIMARY KEY, val)
 `
 
-func getDB() (*sql.DB, error) {
-	database, err := sql.Open("sqlite3", "file:storage?mode=memory")
+func getDB(connection string) (*sql.DB, error) {
+	if connection == "" {
+		connection = "file:storage?mode=memory"
+	}
+
+	database, err := sql.Open("sqlite3", connection)
 	if err != nil {
 		return nil, err
 	}
