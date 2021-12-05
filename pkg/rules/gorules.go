@@ -176,8 +176,17 @@ func (e *Engine) Run() error {
 	var ruleNum int
 	var resources string
 
+	instantiationErrors := map[int]int{}
+
+	statement, err := e.DB.Prepare("DELETE FROM instantiations WHERE ID = ?")
+	if err != nil {
+		return err
+	}
+
+	defer statement.Close()
+
 	for {
-		err := e.DB.QueryRow("SELECT instantiations.ID, ruleNum, json_group_array((SELECT DATA FROM resources WHERE ID = res.value)) FROM instantiations, json_each(instantiations.resources) res GROUP BY instantiations.ID, ruleNum ORDER BY priority, timestamp LIMIT 1").Scan(&id, &ruleNum, &resources)
+		err := e.DB.QueryRow("SELECT instantiations.ID, ruleNum, json_group_array(json((SELECT DATA FROM resources WHERE ID = res.value))) FROM instantiations, json_each(instantiations.resources) res GROUP BY instantiations.ID, ruleNum ORDER BY priority, timestamp LIMIT 1").Scan(&id, &ruleNum, &resources)
 		// err := e.DB.QueryRow("SELECT ID, ruleNum, resources FROM instantiations ORDER BY priority, timestamp LIMIT 1").Scan(&id, &ruleNum, &resources)
 		switch {
 		case err == sql.ErrNoRows:
@@ -186,7 +195,14 @@ func (e *Engine) Run() error {
 			return err
 		default:
 			if err := e.CallAction(ruleNum, resources); err != nil {
-				return err
+				count := instantiationErrors[id]
+				if count > 3 {
+					return err
+				}
+				instantiationErrors[id] = count + 1
+			} else {
+				delete(instantiationErrors, id)
+				_, err = statement.Exec(id)
 			}
 		}
 	}
@@ -199,7 +215,6 @@ func (e *Engine) CallAction(ruleNum int, resources string) error {
 		return err
 	}
 
-	fmt.Printf("RS: %s\nDATA: %#v\n", resources, data)
 	return e.RuleFunctions[ruleNum](data)
 }
 
