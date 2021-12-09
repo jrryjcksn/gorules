@@ -49,7 +49,7 @@ type Table struct {
 	Name, BackingName string
 }
 
-type ActionFunc func(args []interface{}) error
+type ActionFunc func(rc *RuleContext) error
 
 type InstantiationData struct {
 	Names     []string
@@ -58,6 +58,7 @@ type InstantiationData struct {
 	Tables    map[string]string
 	Refs      map[string]bool
 	//	FieldChecks    map[string]map[string]bool
+	ObjectMap   map[string]int
 	Queries     map[string]Queries
 	gensymCount int
 }
@@ -93,6 +94,7 @@ type Engine struct {
 	RuleSets        []*RuleSetVal
 	RuleCount       int
 	RuleFunctions   map[int]ActionFunc
+	ObjectMaps      map[int]map[string]int
 	KeyFunction     KeyFunc
 }
 
@@ -111,6 +113,7 @@ func NewEngine(path string, rulesets ...string) (*Engine, error) {
 		KeyFunction:     defaultKeyFunc,
 		RuleFunctions:   map[int]ActionFunc{},
 		RuleSets:        []*RuleSetVal{},
+		ObjectMaps:      map[int]map[string]int{},
 		RuleNameToIndex: map[string]int{},
 		IndexToRuleName: map[int]string{},
 	}
@@ -138,7 +141,7 @@ func (e *Engine) AddRuleSet(name string) error {
 	for _, rule := range rs.Rules {
 		idata := &InstantiationData{
 			Names:     []string{},
-			RuleIndex: e.RuleCount,
+			RuleIndex: ruleID,
 			Tables:    map[string]string{},
 			Refs:      map[string]bool{},
 			Queries:   map[string]Queries{},
@@ -154,6 +157,7 @@ func (e *Engine) AddRuleSet(name string) error {
 			}
 		}
 
+		e.ObjectMaps[ruleID] = idata.ObjectMap
 		ruleID++
 	}
 
@@ -178,44 +182,88 @@ func (e *Engine) Run() error {
 
 	instantiationErrors := map[int]int{}
 
-	statement, err := e.DB.Prepare("DELETE FROM instantiations WHERE ID = ?")
-	if err != nil {
-		return err
-	}
-
-	defer statement.Close()
-
 	for {
-		err := e.DB.QueryRow("SELECT instantiations.ID, ruleNum, json_group_array(json((SELECT DATA FROM resources WHERE ID = res.value))) FROM instantiations, json_each(instantiations.resources) res GROUP BY instantiations.ID, ruleNum ORDER BY priority, timestamp LIMIT 1").Scan(&id, &ruleNum, &resources)
-		// err := e.DB.QueryRow("SELECT ID, ruleNum, resources FROM instantiations ORDER BY priority, timestamp LIMIT 1").Scan(&id, &ruleNum, &resources)
+		tx, err := e.DB.Begin()
+		if err != nil {
+			return err
+		}
+
+		defer tx.Rollback() // The rollback will be ignored if the tx has been committed later in the function.
+
+		err = tx.QueryRow("SELECT instantiations.ID, ruleNum, json_group_array(res.value) FROM instantiations, json_each(instantiations.resources) res GROUP BY instantiations.ID, ruleNum ORDER BY priority, timestamp LIMIT 1").Scan(&id, &ruleNum, &resources)
+
 		switch {
 		case err == sql.ErrNoRows:
 			return nil
 		case err != nil:
 			return err
 		default:
-			if err := e.CallAction(ruleNum, resources); err != nil {
+			var resIds []int
+
+			if err := json.Unmarshal([]byte(resources), &resIds); err != nil {
+				return err
+			}
+
+			rc := &RuleContext{tx: tx, resourceMap: e.ObjectMaps[ruleNum], resources: resIds}
+
+			if err := e.CallAction(rc, e.RuleFunctions[ruleNum]); err != nil {
 				count := instantiationErrors[id]
 				if count > 3 {
 					return err
 				}
+
 				instantiationErrors[id] = count + 1
 			} else {
 				delete(instantiationErrors, id)
+				statement, err := tx.Prepare("DELETE FROM instantiations WHERE ID = ?")
+				if err != nil {
+					return err
+				}
+
+				defer statement.Close()
+
 				_, err = statement.Exec(id)
+				if err != nil {
+					return nil
+				}
+
+				if err := tx.Commit(); err != nil {
+					return err
+				}
 			}
 		}
 	}
 }
 
-func (e *Engine) CallAction(ruleNum int, resources string) error {
-	var data []interface{}
+type RuleContext struct {
+	tx          *sql.Tx
+	resourceMap map[string]int
+	resources   []int
+}
 
-	if err := json.Unmarshal([]byte(resources), &data); err != nil {
-		return err
+func (rc *RuleContext) GetIntField(objname, path string) (int, error) {
+	idx, ok := rc.resourceMap[objname]
+	if !ok {
+		return 0, fmt.Errorf("unknown object: %s", objname)
 	}
 
-	return e.RuleFunctions[ruleNum](data)
+	s, err := rc.tx.Prepare("SELECT json_extract(data, ?) FROM Resources WHERE ID = ?")
+	if err != nil {
+		return 0, err
+	}
+
+	var field int
+
+	err = s.QueryRow(path, rc.resources[idx]).Scan(&field)
+	if err != nil {
+		return 0, err
+	}
+
+	return field, nil
+}
+
+func (e *Engine) CallAction(rc *RuleContext, action ActionFunc) error {
+	return action(rc)
 }
 
 func (e *Engine) ApplyInTransaction(sql []string) error {
@@ -690,10 +738,12 @@ func (r RuleVal) Instantiate(data *InstantiationData, matchIndex int) (string, e
 	}
 
 	data.Queries[""] = Queries{Insert: cexp}
+	data.ObjectMap = map[string]int{}
 
-	for _, mv := range r.Conditions.MatchVals {
+	for idx, mv := range r.Conditions.MatchVals {
 		n := mv.Name
 		data.Queries[n] = Queries{Insert: fmt.Sprintf("CREATE TRIGGER %s_resources_%d AFTER INSERT ON resources WHEN NEW.KIND = '%s' BEGIN %s AND %s.ID = NEW.ID; END", n, data.RuleIndex, mv.Kind, cexp, n)}
+		data.ObjectMap[n] = idx
 	}
 
 	return cexp, nil
