@@ -241,7 +241,7 @@ type RuleContext struct {
 	resources   []int
 }
 
-func (rc *RuleContext) GetIntField(objname, path string) (int, error) {
+func (rc *RuleContext) GetIntField(objname string, segments ...string) (int, error) {
 	idx, ok := rc.resourceMap[objname]
 	if !ok {
 		return 0, fmt.Errorf("unknown object: %s", objname)
@@ -253,6 +253,8 @@ func (rc *RuleContext) GetIntField(objname, path string) (int, error) {
 	}
 
 	var field int
+
+	path := fmt.Sprintf("$.%s", strings.Join(segments, "."))
 
 	err = s.QueryRow(path, rc.resources[idx]).Scan(&field)
 	if err != nil {
