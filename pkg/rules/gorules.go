@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -75,13 +76,19 @@ type RuleName string
 
 type RuleIndex int
 
-type KeyFunc func(jstr string) (string, string, string, error)
+type KeyFunc func(jstr interface{}) (string, string, string, error)
 
-func defaultKeyFunc(jstr string) (string, string, string, error) {
+func defaultKeyFunc(jstr interface{}) (string, string, string, error) {
 	var res map[string]interface{}
 
-	if err := json.Unmarshal([]byte(jstr), &res); err != nil {
-		return "", "", "", err
+	switch v := jstr.(type) {
+	case string:
+		if err := json.Unmarshal([]byte(v), &res); err != nil {
+			return "", "", "", err
+		}
+
+	default:
+		res = jstr.(map[string]interface{})
 	}
 
 	return res["kind"].(string), res["metadata"].(map[string]interface{})["name"].(string), res["metadata"].(map[string]interface{})["namespace"].(string), nil
@@ -183,14 +190,18 @@ func (e *Engine) Run() error {
 	instantiationErrors := map[int]int{}
 
 	for {
+		fmt.Printf("1\n")
 		tx, err := e.DB.Begin()
 		if err != nil {
 			return err
 		}
+		fmt.Printf("2\n")
 
 		defer tx.Rollback() // The rollback will be ignored if the tx has been committed later in the function.
 
 		err = tx.QueryRow("SELECT instantiations.ID, ruleNum, json_group_array(res.value) FROM instantiations, json_each(instantiations.resources) res GROUP BY instantiations.ID, ruleNum ORDER BY priority, timestamp LIMIT 1").Scan(&id, &ruleNum, &resources)
+
+		fmt.Printf("3\n")
 
 		switch {
 		case err == sql.ErrNoRows:
@@ -199,6 +210,8 @@ func (e *Engine) Run() error {
 			return err
 		default:
 			var resIds []int
+
+			fmt.Printf("4\n")
 
 			if err := json.Unmarshal([]byte(resources), &resIds); err != nil {
 				return err
@@ -224,7 +237,7 @@ func (e *Engine) Run() error {
 
 				_, err = statement.Exec(id)
 				if err != nil {
-					return nil
+					return err
 				}
 
 				if err := tx.Commit(); err != nil {
@@ -241,7 +254,164 @@ type RuleContext struct {
 	resources   []int
 }
 
-func (rc *RuleContext) GetIntField(objname string, segments ...string) (int, error) {
+func (rc *RuleContext) Add(obj interface{}) error {
+	stmt, err := rc.tx.Prepare(insertSQL)
+	if err != nil {
+		return err
+	}
+
+	defer stmt.Close()
+
+	switch v := obj.(type) {
+	case string:
+		kind, name, namespace, err := defaultKeyFunc(v)
+		if err != nil {
+			return err
+		}
+
+		_, err = stmt.Exec(kind, name, namespace, v)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	case *FetchedResource:
+		err = v.unmarshal()
+		if err != nil {
+			return err
+		}
+
+		res := v.unmarshaled
+
+		s, err := json.Marshal(res)
+		if err != nil {
+			return err
+		}
+
+		kind, name, namespace := res["kind"].(string), res["metadata"].(map[string]interface{})["name"].(string), res["metadata"].(map[string]interface{})["namespace"].(string)
+
+		fmt.Printf("ADDING: %s\nK: %s, N: %s, NS: %s\n", s, kind, name, namespace)
+		_, err = stmt.Exec(kind, name, namespace, s)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	default:
+		return nil
+	}
+}
+
+type FetchedResource struct {
+	raw         string
+	unmarshaled map[string]interface{}
+}
+
+func (fr *FetchedResource) unmarshal() error {
+	if fr.unmarshaled == nil {
+		if err := json.Unmarshal([]byte(fr.raw), &fr.unmarshaled); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (fr *FetchedResource) set(f FieldVal, val interface{}) error {
+	if err := fr.unmarshal(); err != nil {
+		return err
+	}
+
+	var current interface{} = fr.unmarshaled
+
+	for _, segment := range f.Path[:len(f.Path)-1] {
+		intval, err := strconv.Atoi(segment)
+
+		if err != nil {
+			mapitem, ok := current.(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("bad path: %s", f.Path)
+			}
+
+			sub, ok := mapitem[segment]
+			if !ok {
+				return fmt.Errorf("bad path: %s", f.Path)
+			}
+
+			current = sub
+		} else {
+			arrayitem, ok := current.([]interface{})
+			if !ok {
+				return fmt.Errorf("bad path: %s", f.Path)
+			}
+
+			if intval < 0 || intval >= len(arrayitem) {
+				return fmt.Errorf("bad path: %s", f.Path)
+			}
+
+			sub := arrayitem[intval]
+
+			current = sub
+		}
+	}
+
+	segment := f.Path[len(f.Path)-1]
+	intval, err := strconv.Atoi(segment)
+
+	if err != nil {
+		mapitem, ok := current.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("bad path: %s", f.Path)
+		}
+
+		mapitem[segment] = val
+	} else {
+		arrayitem, ok := current.([]interface{})
+		if !ok {
+			return fmt.Errorf("bad path: %s", f.Path)
+		}
+
+		arrayitem[intval] = val
+	}
+
+	return nil
+}
+
+func (rc *RuleContext) Set(item *FetchedResource, f FieldVal, val interface{}) error {
+	return item.set(f, val)
+}
+
+func (rc *RuleContext) Delete(objname string) (*FetchedResource, error) {
+	idx, ok := rc.resourceMap[objname]
+	if !ok {
+		return nil, fmt.Errorf("unknown object: %s", objname)
+	}
+
+	s, err := rc.tx.Prepare("DELETE FROM Resources WHERE ID = ? RETURNING DATA")
+	if err != nil {
+		return nil, err
+	}
+
+	var objstr sql.NullString
+
+	err = s.QueryRow(rc.resources[idx]).Scan(&objstr)
+	if err != nil {
+		return nil, err
+	}
+
+	if objstr.Valid {
+		val, err := objstr.Value()
+		if err != nil {
+			return nil, err
+		}
+
+		return &FetchedResource{raw: val.(string)}, nil
+	}
+
+	return nil, fmt.Errorf("invalid deleted object: %s", objname)
+}
+
+func (rc *RuleContext) GetIntField(objname string, defaultValue int64, segments ...string) (int64, error) {
 	idx, ok := rc.resourceMap[objname]
 	if !ok {
 		return 0, fmt.Errorf("unknown object: %s", objname)
@@ -252,7 +422,7 @@ func (rc *RuleContext) GetIntField(objname string, segments ...string) (int, err
 		return 0, err
 	}
 
-	var field int
+	var field sql.NullInt64
 
 	path := fmt.Sprintf("$.%s", strings.Join(segments, "."))
 
@@ -261,7 +431,48 @@ func (rc *RuleContext) GetIntField(objname string, segments ...string) (int, err
 		return 0, err
 	}
 
-	return field, nil
+	if field.Valid {
+		val, err := field.Value()
+		if err != nil {
+			return 0, err
+		}
+
+		return val.(int64), nil
+	}
+
+	return defaultValue, nil
+}
+
+func (rc *RuleContext) GetStringField(objname, defaultValue string, segments ...string) (string, error) {
+	idx, ok := rc.resourceMap[objname]
+	if !ok {
+		return "", fmt.Errorf("unknown object: %s", objname)
+	}
+
+	s, err := rc.tx.Prepare("SELECT json_extract(data, ?) FROM Resources WHERE ID = ?")
+	if err != nil {
+		return "", err
+	}
+
+	var field sql.NullString
+
+	path := fmt.Sprintf("$.%s", strings.Join(segments, "."))
+
+	err = s.QueryRow(path, rc.resources[idx]).Scan(&field)
+	if err != nil {
+		return "", err
+	}
+
+	if field.Valid {
+		val, err := field.Value()
+		if err != nil {
+			return "", err
+		}
+
+		return val.(string), nil
+	}
+
+	return defaultValue, nil
 }
 
 func (e *Engine) CallAction(rc *RuleContext, action ActionFunc) error {
