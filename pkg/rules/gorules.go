@@ -190,18 +190,14 @@ func (e *Engine) Run() error {
 	instantiationErrors := map[int]int{}
 
 	for {
-		fmt.Printf("1\n")
 		tx, err := e.DB.Begin()
 		if err != nil {
 			return err
 		}
-		fmt.Printf("2\n")
 
 		defer tx.Rollback() // The rollback will be ignored if the tx has been committed later in the function.
 
 		err = tx.QueryRow("SELECT instantiations.ID, ruleNum, json_group_array(res.value) FROM instantiations, json_each(instantiations.resources) res GROUP BY instantiations.ID, ruleNum ORDER BY priority, timestamp LIMIT 1").Scan(&id, &ruleNum, &resources)
-
-		fmt.Printf("3\n")
 
 		switch {
 		case err == sql.ErrNoRows:
@@ -209,9 +205,19 @@ func (e *Engine) Run() error {
 		case err != nil:
 			return err
 		default:
-			var resIds []int
+			statement, err := tx.Prepare("DELETE FROM instantiations WHERE ID = ?")
+			if err != nil {
+				return err
+			}
 
-			fmt.Printf("4\n")
+			defer statement.Close()
+
+			_, err = statement.Exec(id)
+			if err != nil {
+				return err
+			}
+
+			var resIds []int
 
 			if err := json.Unmarshal([]byte(resources), &resIds); err != nil {
 				return err
@@ -228,17 +234,6 @@ func (e *Engine) Run() error {
 				instantiationErrors[id] = count + 1
 			} else {
 				delete(instantiationErrors, id)
-				statement, err := tx.Prepare("DELETE FROM instantiations WHERE ID = ?")
-				if err != nil {
-					return err
-				}
-
-				defer statement.Close()
-
-				_, err = statement.Exec(id)
-				if err != nil {
-					return err
-				}
 
 				if err := tx.Commit(); err != nil {
 					return err
@@ -290,7 +285,6 @@ func (rc *RuleContext) Add(obj interface{}) error {
 
 		kind, name, namespace := res["kind"].(string), res["metadata"].(map[string]interface{})["name"].(string), res["metadata"].(map[string]interface{})["namespace"].(string)
 
-		fmt.Printf("ADDING: %s\nK: %s, N: %s, NS: %s\n", s, kind, name, namespace)
 		_, err = stmt.Exec(kind, name, namespace, s)
 		if err != nil {
 			return err
@@ -480,9 +474,9 @@ func (e *Engine) CallAction(rc *RuleContext, action ActionFunc) error {
 }
 
 func (e *Engine) ApplyInTransaction(sql []string) error {
-	for _, q := range sql {
-		fmt.Printf("SQL: %s\n", q)
-	}
+	// for _, q := range sql {
+	//  fmt.Printf("SQL: %s\n", q)
+	// }
 
 	tx, err := e.DB.Begin()
 	if err != nil {
