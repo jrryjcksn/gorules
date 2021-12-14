@@ -28,7 +28,8 @@ CREATE TABLE configuration (name TEXT PRIMARY KEY, val)
 
 func getDB(connection string) (*sql.DB, error) {
 	if connection == "" {
-		connection = "file:storage?mode=memory"
+		connection = "file::memory:?cache=shared"
+		//     connection = "file::memory:"
 	}
 
 	database, err := sql.Open("sqlite3", connection)
@@ -41,13 +42,25 @@ func getDB(connection string) (*sql.DB, error) {
 			continue
 		}
 
-		statement, err := database.Prepare(entry)
+		tx, err := database.Begin()
 		if err != nil {
 			return nil, err
 		}
 
-		_, err = statement.Exec()
+		s, err := tx.Prepare(entry)
 		if err != nil {
+			return nil, err
+		}
+
+		// defer tx.Rollback() // The rollback will be ignored if the tx has been committed later in the function.
+		_, err = s.Exec()
+		if err != nil {
+			return nil, err
+		}
+
+		s.Close()
+
+		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
 	}

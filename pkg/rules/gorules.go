@@ -195,7 +195,7 @@ func (e *Engine) Run() error {
 			return err
 		}
 
-		defer tx.Rollback() // The rollback will be ignored if the tx has been committed later in the function.
+		//		defer tx.Rollback() // The rollback will be ignored if the tx has been committed later in the function.
 
 		err = tx.QueryRow("SELECT instantiations.ID, ruleNum, json_group_array(res.value) FROM instantiations, json_each(instantiations.resources) res GROUP BY instantiations.ID, ruleNum ORDER BY priority, timestamp LIMIT 1").Scan(&id, &ruleNum, &resources)
 
@@ -226,12 +226,14 @@ func (e *Engine) Run() error {
 			rc := &RuleContext{tx: tx, resourceMap: e.ObjectMaps[ruleNum], resources: resIds}
 
 			if err := e.CallAction(rc, e.RuleFunctions[ruleNum]); err != nil {
+				fmt.Printf("ERR: %v\n", err)
 				count := instantiationErrors[id]
 				if count > 3 {
 					return err
 				}
 
 				instantiationErrors[id] = count + 1
+				tx.Rollback()
 			} else {
 				delete(instantiationErrors, id)
 
@@ -388,7 +390,9 @@ func (rc *RuleContext) Delete(objname string) (*FetchedResource, error) {
 
 	var objstr sql.NullString
 
+	//	err = s.QueryRow(fmt.Sprintf("DELETE FROM Resources WHERE ID = %s RETURNING DATA", rc.resources[idx])).Scan(&objstr)
 	err = s.QueryRow(rc.resources[idx]).Scan(&objstr)
+	//	err := rc.tx.QueryRow(fmt.Sprintf("DELETE FROM Resources WHERE ID = %s RETURNING DATA", rc.resources[idx])).Scan(&objstr)
 	if err != nil {
 		return nil, err
 	}
@@ -474,7 +478,7 @@ func (e *Engine) CallAction(rc *RuleContext, action ActionFunc) error {
 }
 
 func (e *Engine) ApplyInTransaction(sql []string) error {
-	// for _, q := range sql {
+	// for _, q :   = range sql {
 	//  fmt.Printf("SQL: %s\n", q)
 	// }
 
@@ -499,18 +503,18 @@ func (e *Engine) ApplyInTransaction(sql []string) error {
 	return tx.Commit()
 }
 
-func (e *Engine) GetResource(kind, name, namespace string) (string, error) {
-	var id int
-	var data string
+// func (e *Engine) GetResource(kind, name, namespace string) (string, error) {
+//  var id int
+//  var data string
 
-	err := e.DB.QueryRow("SELECT ID, DATA FROM resources WHERE KIND = ? AND NAME = ? AND NAMESPACE = ?", kind, name, namespace).Scan(&id, &data)
-	if err != nil {
-		return "", err
-	}
+//  err := e.DB.QueryRow("SELECT ID, DATA FROM resources WHERE KIND = ? AND NAME = ? AND NAMESPACE = ?", kind, name, namespace).Scan(&id, &data)
+//  if err != nil {
+//      return "", err
+//  }
 
-	//	fmt.Printf("ID: %d\n", id)
-	return data, nil
-}
+//  //	fmt.Printf("ID: %d\n", id)
+//  return data, nil
+// }
 
 func (e *Engine) AddResourceList(resources ...interface{}) error {
 	rstrings := []string{}
