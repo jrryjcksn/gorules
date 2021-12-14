@@ -205,14 +205,14 @@ func (e *Engine) Run() error {
 		case err != nil:
 			return err
 		default:
-			statement, err := tx.Prepare("DELETE FROM instantiations WHERE ID = ?")
-			if err != nil {
-				return err
-			}
+			// statement, err := tx.Prepare("DELETE FROM instantiations WHERE ID = ?")
+			// if err != nil {
+			//  return err
+			// }
 
-			defer statement.Close()
+			// defer statement.Close()
 
-			_, err = statement.Exec(id)
+			_, err = tx.Exec(fmt.Sprintf("DELETE FROM instantiations WHERE ID = %d", id))
 			if err != nil {
 				return err
 			}
@@ -273,7 +273,7 @@ func (rc *RuleContext) Add(obj interface{}) error {
 
 		return nil
 	case *FetchedResource:
-		err = v.unmarshal()
+		err := v.unmarshal()
 		if err != nil {
 			return err
 		}
@@ -291,6 +291,11 @@ func (rc *RuleContext) Add(obj interface{}) error {
 		if err != nil {
 			return err
 		}
+
+		// _, err = stmt.Exec(kind, name, namespace, s)
+		// if err != nil {
+		//  return err
+		// }
 
 		return nil
 	default:
@@ -383,16 +388,16 @@ func (rc *RuleContext) Delete(objname string) (*FetchedResource, error) {
 		return nil, fmt.Errorf("unknown object: %s", objname)
 	}
 
-	s, err := rc.tx.Prepare("DELETE FROM Resources WHERE ID = ? RETURNING DATA")
-	if err != nil {
-		return nil, err
-	}
+	// s, err := rc.tx.Prepare("DELETE FROM Resources WHERE ID = ? RETURNING DATA")
+	// if err != nil {
+	//  return nil, err
+	// }
 
 	var objstr sql.NullString
 
 	//	err = s.QueryRow(fmt.Sprintf("DELETE FROM Resources WHERE ID = %s RETURNING DATA", rc.resources[idx])).Scan(&objstr)
-	err = s.QueryRow(rc.resources[idx]).Scan(&objstr)
-	//	err := rc.tx.QueryRow(fmt.Sprintf("DELETE FROM Resources WHERE ID = %s RETURNING DATA", rc.resources[idx])).Scan(&objstr)
+	// err = s.QueryRow(rc.resources[idx]).Scan(&objstr)
+	err := rc.tx.QueryRow(fmt.Sprintf("DELETE FROM Resources WHERE ID = %d RETURNING DATA", rc.resources[idx])).Scan(&objstr)
 	if err != nil {
 		return nil, err
 	}
@@ -415,16 +420,16 @@ func (rc *RuleContext) GetIntField(objname string, defaultValue int64, segments 
 		return 0, fmt.Errorf("unknown object: %s", objname)
 	}
 
-	s, err := rc.tx.Prepare("SELECT json_extract(data, ?) FROM Resources WHERE ID = ?")
-	if err != nil {
-		return 0, err
-	}
+	// s, err := rc.tx.Prepare("SELECT json_extract(data, ?) FROM Resources WHERE ID = ?")
+	// if err != nil {
+	//  return 0, err
+	// }
 
 	var field sql.NullInt64
 
 	path := fmt.Sprintf("$.%s", strings.Join(segments, "."))
 
-	err = s.QueryRow(path, rc.resources[idx]).Scan(&field)
+	err := rc.tx.QueryRow(fmt.Sprintf("SELECT json_extract(data, '%s') FROM Resources WHERE ID = %d", path, rc.resources[idx])).Scan(&field)
 	if err != nil {
 		return 0, err
 	}
