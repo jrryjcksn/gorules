@@ -252,12 +252,12 @@ type RuleContext struct {
 }
 
 func (rc *RuleContext) Add(obj interface{}) error {
-	stmt, err := rc.tx.Prepare(insertSQL)
-	if err != nil {
-		return err
-	}
+	// stmt, err := rc.tx.Prepare(insertSQL)
+	// if err != nil {
+	//  return err
+	// }
 
-	defer stmt.Close()
+	// defer stmt.Close()
 
 	switch v := obj.(type) {
 	case string:
@@ -266,7 +266,7 @@ func (rc *RuleContext) Add(obj interface{}) error {
 			return err
 		}
 
-		_, err = stmt.Exec(kind, name, namespace, v)
+		_, err = rc.tx.Exec(fmt.Sprintf("INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('%s', '%s', '%s', '%s') ON CONFLICT DO UPDATE SET DATA = excluded.DATA", kind, name, namespace, v))
 		if err != nil {
 			return err
 		}
@@ -287,7 +287,7 @@ func (rc *RuleContext) Add(obj interface{}) error {
 
 		kind, name, namespace := res["kind"].(string), res["metadata"].(map[string]interface{})["name"].(string), res["metadata"].(map[string]interface{})["namespace"].(string)
 
-		_, err = stmt.Exec(kind, name, namespace, s)
+		_, err = rc.tx.Exec(fmt.Sprintf("INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('%s', '%s', '%s', '%s') ON CONFLICT DO UPDATE SET DATA = excluded.DATA", kind, name, namespace, s))
 		if err != nil {
 			return err
 		}
@@ -452,19 +452,24 @@ func (rc *RuleContext) GetStringField(objname, defaultValue string, segments ...
 		return "", fmt.Errorf("unknown object: %s", objname)
 	}
 
-	s, err := rc.tx.Prepare("SELECT json_extract(data, ?) FROM Resources WHERE ID = ?")
-	if err != nil {
-		return "", err
-	}
+	// s, err := rc.tx.Prepare("SELECT json_extract(data, ?) FROM Resources WHERE ID = ?")
+	// if err != nil {
+	//  return "", err
+	// }
 
 	var field sql.NullString
 
 	path := fmt.Sprintf("$.%s", strings.Join(segments, "."))
 
-	err = s.QueryRow(path, rc.resources[idx]).Scan(&field)
+	err := rc.tx.QueryRow(fmt.Sprintf("SELECT json_extract(data, '%s') FROM Resources WHERE ID = %d", path, rc.resources[idx])).Scan(&field)
 	if err != nil {
 		return "", err
 	}
+
+	// err = s.QueryRow(path, rc.resources[idx]).Scan(&field)
+	// if err != nil {
+	//  return "", err
+	// }
 
 	if field.Valid {
 		val, err := field.Value()
