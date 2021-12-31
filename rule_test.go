@@ -215,7 +215,6 @@ var dep = `{
 // }`
 
 func TestRule(t *testing.T) {
-	//func main() {
 	RuleSet(
 		"test",
 		Rule(Name("rule1"),
@@ -223,33 +222,15 @@ func TestRule(t *testing.T) {
 				Match("Deployment", "foo", Namespace("kube-system"), LT(Field("spec", "replicas"), Number(1000)))),
 			Actions(
 				func(c *RuleContext) error {
-					field, err := c.GetIntField("foo", 0, "spec", "replicas")
+					field, err := c.GetIntField("foo", Field("spec", "replicas"), 0)
 					if err != nil {
 						fmt.Printf("%v\n", err)
 						return err
 					}
 
-					//					fmt.Printf("replicas: %d\n", field)
-
-					// sfield, err := c.GetStringField("foo", "", "metadata", "name")
-					// if err != nil {
-					//  return err
-					// }
-
-					// fmt.Printf("name: %s\n", sfield)
-
-					foo, err := c.Delete("foo")
-					if err != nil {
-						return err
-					}
-
-					c.Set(foo, Field("spec", "replicas"), field+1)
-					c.Add(foo)
-
-					return nil
+					return c.UpdateField("foo", Field("spec", "replicas"), field+1)
 				})))
 
-	//	e, err := NewEngine("file:/tmp/db", "test")
 	e, err := NewEngine("", "test")
 
 	if err != nil {
@@ -267,6 +248,44 @@ func TestRule(t *testing.T) {
 	elapsed := time.Since(start)
 	fmt.Printf("Time: %s\n", elapsed)
 }
+
+// e, err := NewEngine("file:/tmp/db", "test")
+
+// func TestRule(t *testing.T) {
+//  RuleSet(
+//      "test",
+//      Rule(Name("rule1"),
+//          Conditions(
+//              Match("Deployment", "foo", Namespace("kube-system"), LT(Field("spec", "replicas"), Number(1000)))),
+//          Actions(
+//              func(c *RuleContext) error {
+//                  field, err := c.GetIntField("foo", Field("spec", "replicas"), 0)
+//                  if err != nil {
+//                      fmt.Printf("%v\n", err)
+//                      return err
+//                  }
+
+//                  //					fmt.Printf("replicas: %d\n", field)
+
+//                  c.UpdateField("foo", Field("spec", "replicas"), field+1)
+
+//                  // sfield, err := c.GetStringField("foo", "metadata", "name", "")
+//                  // if err != nil {
+//                  //  return err
+//                  // }
+
+//                  // fmt.Printf("name: %s\n", sfield)
+
+//                  // foo, err := c.Delete("foo")
+//                  // if err != nil {
+//                  //  return err
+//                  // }
+
+//                  // c.Set(foo, Field("spec", "replicas"), field+1)
+//                  // c.Add(foo)
+
+//                  return nil
+//              })))
 
 //  database, err := sql.Open("sqlite3", "file:storage?mode=memory")
 //  if err != nil {

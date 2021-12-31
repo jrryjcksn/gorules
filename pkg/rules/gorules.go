@@ -54,6 +54,7 @@ type ActionFunc func(rc *RuleContext) error
 
 type InstantiationData struct {
 	Names     []string
+	Kinds     []string
 	RuleIndex int
 	Priority  int
 	Tables    map[string]string
@@ -61,6 +62,7 @@ type InstantiationData struct {
 	//	FieldChecks    map[string]map[string]bool
 	ObjectMap   map[string]int
 	Queries     map[string]Queries
+	Indexes     map[string]map[string]bool
 	gensymCount int
 }
 
@@ -106,7 +108,7 @@ type Engine struct {
 }
 
 func (q Queries) AddSQL(allQueries []string) []string {
-	return append(allQueries, q.Insert)
+	return append(allQueries, q.Insert, q.Update)
 }
 
 func NewEngine(path string, rulesets ...string) (*Engine, error) {
@@ -152,6 +154,7 @@ func (e *Engine) AddRuleSet(name string) error {
 			Tables:    map[string]string{},
 			Refs:      map[string]bool{},
 			Queries:   map[string]Queries{},
+			Indexes:   map[string]map[string]bool{},
 		}
 
 		if _, err := rule.Instantiate(idata, 0); err != nil {
@@ -161,6 +164,12 @@ func (e *Engine) AddRuleSet(name string) error {
 		for key, val := range idata.Queries {
 			if key != "" {
 				allSQL = val.AddSQL(allSQL)
+			}
+		}
+
+		for kind, idxs := range idata.Indexes {
+			for p, _ := range idxs {
+				allSQL = append(allSQL, fmt.Sprintf("CREATE index %s_%s ON resources (json_extract(DATA, '$.%s')) WHERE KIND = '%s'", kind, strings.ReplaceAll(p, ".", "_"), p, kind))
 			}
 		}
 
@@ -414,7 +423,31 @@ func (rc *RuleContext) Delete(objname string) (*FetchedResource, error) {
 	return nil, fmt.Errorf("invalid deleted object: %s", objname)
 }
 
-func (rc *RuleContext) GetIntField(objname string, defaultValue int64, segments ...string) (int64, error) {
+func (rc *RuleContext) UpdateField(objname string, f FieldVal, val interface{}) error {
+	idx, ok := rc.resourceMap[objname]
+	if !ok {
+		return fmt.Errorf("unknown object: %s", objname)
+	}
+
+	path := fmt.Sprintf("$.%s", strings.Join(f.Path, "."))
+
+	var err error
+
+	switch v := val.(type) {
+	case int64:
+		_, err = rc.tx.Exec(fmt.Sprintf("UPDATE Resources SET data = json_set(data, '%s', %d) WHERE ID = %d", path, v, rc.resources[idx]))
+	case string:
+		_, err = rc.tx.Exec(fmt.Sprintf("UPDATE Resources SET data = json_set(data, '%s', json('%s') WHERE ID = %d", path, v, rc.resources[idx]))
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (rc *RuleContext) GetIntField(objname string, f FieldVal, defaultValue int64) (int64, error) {
 	idx, ok := rc.resourceMap[objname]
 	if !ok {
 		return 0, fmt.Errorf("unknown object: %s", objname)
@@ -427,7 +460,7 @@ func (rc *RuleContext) GetIntField(objname string, defaultValue int64, segments 
 
 	var field sql.NullInt64
 
-	path := fmt.Sprintf("$.%s", strings.Join(segments, "."))
+	path := fmt.Sprintf("$.%s", strings.Join(f.Path, "."))
 
 	err := rc.tx.QueryRow(fmt.Sprintf("SELECT json_extract(data, '%s') FROM Resources WHERE ID = %d", path, rc.resources[idx])).Scan(&field)
 	if err != nil {
@@ -446,7 +479,7 @@ func (rc *RuleContext) GetIntField(objname string, defaultValue int64, segments 
 	return defaultValue, nil
 }
 
-func (rc *RuleContext) GetStringField(objname, defaultValue string, segments ...string) (string, error) {
+func (rc *RuleContext) GetStringField(objname string, f FieldVal, defaultValue string) (string, error) {
 	idx, ok := rc.resourceMap[objname]
 	if !ok {
 		return "", fmt.Errorf("unknown object: %s", objname)
@@ -459,7 +492,7 @@ func (rc *RuleContext) GetStringField(objname, defaultValue string, segments ...
 
 	var field sql.NullString
 
-	path := fmt.Sprintf("$.%s", strings.Join(segments, "."))
+	path := fmt.Sprintf("$.%s", strings.Join(f.Path, "."))
 
 	err := rc.tx.QueryRow(fmt.Sprintf("SELECT json_extract(data, '%s') FROM Resources WHERE ID = %d", path, rc.resources[idx])).Scan(&field)
 	if err != nil {
@@ -963,7 +996,10 @@ func (r RuleVal) Instantiate(data *InstantiationData, matchIndex int) (string, e
 
 	for idx, mv := range r.Conditions.MatchVals {
 		n := mv.Name
-		data.Queries[n] = Queries{Insert: fmt.Sprintf("CREATE TRIGGER %s_resources_%d AFTER INSERT ON resources WHEN NEW.KIND = '%s' BEGIN %s AND %s.ID = NEW.ID; END", n, data.RuleIndex, mv.Kind, cexp, n)}
+		data.Queries[n] =
+			Queries{
+				Insert: fmt.Sprintf("CREATE TRIGGER %s_resources_i_%d AFTER INSERT ON resources WHEN NEW.KIND = '%s' BEGIN %s AND %s.ID = NEW.ID; END", n, data.RuleIndex, mv.Kind, cexp, n),
+				Update: fmt.Sprintf("CREATE TRIGGER %s_resources_u_%d AFTER UPDATE ON resources WHEN NEW.KIND = '%s' BEGIN %s AND %s.ID = NEW.ID; END", n, data.RuleIndex, mv.Kind, cexp, n)}
 		data.ObjectMap[n] = idx
 	}
 
@@ -1028,6 +1064,7 @@ func (c ConditionsVal) ConditionsGenerate() Instantiable {
 
 		for _, m := range c.MatchVals {
 			data.Names = append(data.Names, m.Name)
+			data.Kinds = append(data.Kinds, m.Kind)
 		}
 
 		matchExp, err := c.Matches[0].Instantiate(data, matchIndex)
@@ -1118,10 +1155,21 @@ func (a ArrayVal) IterableKeyGenerate() Instantiable {
 	}
 }
 
+func addIndex(data *InstantiationData, matchIndex int, path string) {
+	idxs := data.Indexes[data.Kinds[matchIndex]]
+	if idxs == nil {
+		idxs = map[string]bool{}
+		data.Indexes[data.Kinds[matchIndex]] = idxs
+	}
+
+	idxs[path] = true
+}
+
 func (f FieldVal) NumericGenerate() Instantiable {
 	path := strings.Join(f.Path, ".")
 
 	return Instantiable{InstFunc: func(data *InstantiationData, matchIndex int) (string, error) {
+		addIndex(data, matchIndex, path)
 		exp := fmt.Sprintf("json_extract(%s.DATA, '$.%s')", data.Names[matchIndex], path)
 
 		//      name := data.Names[matchIndex]
@@ -1143,7 +1191,10 @@ func (f FieldVal) ComparableGenerate() Instantiable {
 }
 
 func (f FieldVal) IterableValueGenerate() Instantiable {
+	path := strings.Join(f.Path, ".")
+
 	return Instantiable{InstFunc: func(data *InstantiationData, matchIndex int) (string, error) {
+		addIndex(data, matchIndex, path)
 		baseTableName := data.Tables[data.Names[matchIndex]]
 		name := data.Gensym(matchIndex)
 		eachName := data.NamedGensym("each")
@@ -1154,7 +1205,10 @@ func (f FieldVal) IterableValueGenerate() Instantiable {
 }
 
 func (f FieldVal) IterableKeyGenerate() Instantiable {
+	path := strings.Join(f.Path, ".")
+
 	return Instantiable{InstFunc: func(data *InstantiationData, matchIndex int) (string, error) {
+		addIndex(data, matchIndex, path)
 		baseTableName := data.Tables[data.Names[matchIndex]]
 		name := data.Gensym(matchIndex)
 		eachName := data.NamedGensym("each")
@@ -1165,7 +1219,10 @@ func (f FieldVal) IterableKeyGenerate() Instantiable {
 }
 
 func (f FieldVal) IterableObjectGenerate() Instantiable {
+	path := strings.Join(f.Path, ".")
+
 	return Instantiable{InstFunc: func(data *InstantiationData, matchIndex int) (string, error) {
+		addIndex(data, matchIndex, path)
 		baseTableName := data.Tables[data.Names[matchIndex]]
 		name := data.Gensym(matchIndex)
 		eachName := data.NamedGensym("each")
@@ -1176,7 +1233,10 @@ func (f FieldVal) IterableObjectGenerate() Instantiable {
 }
 
 func (j JoinFieldVal) NumericGenerate() Instantiable {
-	return Instantiable{InstFunc: func(data *InstantiationData, _ int) (string, error) {
+	path := strings.Join(j.Path, ".")
+
+	return Instantiable{InstFunc: func(data *InstantiationData, matchIndex int) (string, error) {
+		addIndex(data, matchIndex, path)
 		data.Refs[j.Name] = true
 
 		return fmt.Sprintf("json_extract(%s.DATA, '$.%s')", j.Name, strings.Join(j.Path, ".")), nil
@@ -1188,7 +1248,10 @@ func (j JoinFieldVal) ComparableGenerate() Instantiable {
 }
 
 func (j JoinFieldVal) IterableValueGenerate() Instantiable {
+	path := strings.Join(j.Path, ".")
+
 	return Instantiable{InstFunc: func(data *InstantiationData, matchIndex int) (string, error) {
+		addIndex(data, matchIndex, path)
 		baseTableName := data.Tables[data.Names[matchIndex]]
 		name := data.NamedGensym(baseTableName)
 		eachName := data.NamedGensym("each")
@@ -1199,7 +1262,10 @@ func (j JoinFieldVal) IterableValueGenerate() Instantiable {
 }
 
 func (j JoinFieldVal) IterableKeyGenerate() Instantiable {
+	path := strings.Join(j.Path, ".")
+
 	return Instantiable{InstFunc: func(data *InstantiationData, matchIndex int) (string, error) {
+		addIndex(data, matchIndex, path)
 		baseTableName := data.Tables[data.Names[matchIndex]]
 		name := data.NamedGensym(baseTableName)
 		eachName := data.NamedGensym("each")
@@ -1210,7 +1276,10 @@ func (j JoinFieldVal) IterableKeyGenerate() Instantiable {
 }
 
 func (j JoinFieldVal) IterableObjectGenerate() Instantiable {
+	path := strings.Join(j.Path, ".")
+
 	return Instantiable{InstFunc: func(data *InstantiationData, matchIndex int) (string, error) {
+		addIndex(data, matchIndex, path)
 		baseTableName := data.Tables[data.Names[matchIndex]]
 		name := data.NamedGensym(baseTableName)
 		eachName := data.NamedGensym("each")
