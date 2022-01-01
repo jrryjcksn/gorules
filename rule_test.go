@@ -209,10 +209,89 @@ var dep = `{
 //         ],
 //         "observedGeneration": 1,
 //         "readyReplicas": 2,
-//         "replicas": 2,
+//         "replicas": 2,IF NOT EXISTS
 //         "updatedReplicas": 2
 //     }
 // }`
+
+type Ball struct {
+	NameVal string
+	Pattern string
+	Color   string
+	Value   int64
+}
+
+func (b *Ball) Kind() string {
+	return "Ball"
+}
+
+func (b *Ball) Name() string {
+	return b.NameVal
+}
+
+type Gurk struct {
+	NameVal string
+	Value   int64
+}
+
+func (g *Gurk) Kind() string {
+	return "Gurk"
+}
+
+func (g *Gurk) Name() string {
+	return g.NameVal
+}
+
+var tripleCount int64 = 0
+
+type Triple struct {
+	Ball1, Ball2, Gurk int64
+}
+
+func (t *Triple) Kind() string {
+	return "Triple"
+}
+
+func (t *Triple) Name() string {
+	count := tripleCount
+	tripleCount++
+
+	return fmt.Sprintf("triple-%d", count)
+}
+
+func TestBig(t *testing.T) {
+	RuleSet(
+		"cross",
+		Rule(Name("foo"),
+			Conditions(
+				Match("Ball", "ball1", EQ(Field("pattern"), String("stripe"))),
+				Match("Ball", "ball2", AND(AND(EQ(Field("pattern"), String("solid")), EQ(JoinField("ball1", "color"), Field("color"))), GT(Field("value"), JoinField("ball1", "value")))),
+				Match("Gurk", "gurk", EQ(Field("value"), JoinField("ball2", "value")))),
+			Actions(
+				func(c *RuleContext) error {
+					b1value, err := c.GetIntField("ball1", Field("value"), 0)
+					if err != nil {
+						return err
+					}
+
+					b2value, err := c.GetIntField("ball2", Field("value"), 0)
+					if err != nil {
+						return err
+					}
+
+					gvalue, err := c.GetIntField("gurk", Field("value"), 0)
+					if err != nil {
+						return err
+					}
+
+					err = c.Add(&Triple{Ball1: b1value, Ball2: b2value, Gurk: gvalue})
+					if err != nil {
+						return err
+					}
+
+					return nil
+				})))
+}
 
 func TestRule(t *testing.T) {
 	RuleSet(
@@ -227,6 +306,8 @@ func TestRule(t *testing.T) {
 						fmt.Printf("%v\n", err)
 						return err
 					}
+
+					// fmt.Printf("F: %v\n", field)
 
 					return c.UpdateField("foo", Field("spec", "replicas"), field+1)
 				})))

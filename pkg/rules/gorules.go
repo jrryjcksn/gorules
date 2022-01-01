@@ -78,9 +78,49 @@ type RuleName string
 
 type RuleIndex int
 
+type Kinded interface {
+	Kind() string
+	Name() string
+}
+
+type Namespaced interface {
+	Namespace() string
+}
+
 type KeyFunc func(jstr interface{}) (string, string, string, error)
 
 func defaultKeyFunc(jstr interface{}) (string, string, string, error) {
+	var kind, name, namespace string
+
+	kindObj, ok := jstr.(Kinded)
+	if ok {
+		kind = kindObj.Kind()
+		name = kindObj.Name()
+
+		nsObj, ok := jstr.(Namespaced)
+		if ok {
+			namespace = nsObj.Namespace()
+		}
+
+		return kind, name, namespace, nil
+	}
+
+	var res map[string]interface{}
+
+	switch v := jstr.(type) {
+	case string:
+		if err := json.Unmarshal([]byte(v), &res); err != nil {
+			return "", "", "", err
+		}
+
+	default:
+		res = jstr.(map[string]interface{})
+	}
+
+	return res["kind"].(string), res["metadata"].(map[string]interface{})["name"].(string), res["metadata"].(map[string]interface{})["namespace"].(string), nil
+}
+
+func KubernetesKeyFunc(jstr interface{}) (string, string, string, error) {
 	var res map[string]interface{}
 
 	switch v := jstr.(type) {
@@ -136,6 +176,31 @@ func NewEngine(path string, rulesets ...string) (*Engine, error) {
 	return eng, nil
 }
 
+func NewK8sEngine(path string, rulesets ...string) (*Engine, error) {
+	db, err := getDB(path)
+	if err != nil {
+		return nil, err
+	}
+
+	eng := &Engine{
+		DB:              db,
+		KeyFunction:     KubernetesKeyFunc,
+		RuleFunctions:   map[int]ActionFunc{},
+		RuleSets:        []*RuleSetVal{},
+		ObjectMaps:      map[int]map[string]int{},
+		RuleNameToIndex: map[string]int{},
+		IndexToRuleName: map[int]string{},
+	}
+
+	for _, rsname := range rulesets {
+		if err := eng.AddRuleSet(rsname); err != nil {
+			return nil, err
+		}
+	}
+
+	return eng, nil
+}
+
 func (e *Engine) AddRuleSet(name string) error {
 	rs, ok := rulesets[name]
 	if !ok {
@@ -169,7 +234,7 @@ func (e *Engine) AddRuleSet(name string) error {
 
 		for kind, idxs := range idata.Indexes {
 			for p, _ := range idxs {
-				allSQL = append(allSQL, fmt.Sprintf("CREATE index %s_%s ON resources (json_extract(DATA, '$.%s')) WHERE KIND = '%s'", kind, strings.ReplaceAll(p, ".", "_"), p, kind))
+				allSQL = append(allSQL, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s_%s ON resources (json_extract(DATA, '$.%s')) WHERE KIND = '%s'", kind, strings.ReplaceAll(p, ".", "_"), p, kind))
 			}
 		}
 
@@ -232,7 +297,7 @@ func (e *Engine) Run() error {
 				return err
 			}
 
-			rc := &RuleContext{tx: tx, resourceMap: e.ObjectMaps[ruleNum], resources: resIds}
+			rc := &RuleContext{keyfunc: e.KeyFunction, tx: tx, resourceMap: e.ObjectMaps[ruleNum], resources: resIds}
 
 			if err := e.CallAction(rc, e.RuleFunctions[ruleNum]); err != nil {
 				fmt.Printf("ERR: %v\n", err)
@@ -255,6 +320,7 @@ func (e *Engine) Run() error {
 }
 
 type RuleContext struct {
+	keyfunc     KeyFunc
 	tx          *sql.Tx
 	resourceMap map[string]int
 	resources   []int
@@ -270,7 +336,7 @@ func (rc *RuleContext) Add(obj interface{}) error {
 
 	switch v := obj.(type) {
 	case string:
-		kind, name, namespace, err := defaultKeyFunc(v)
+		kind, name, namespace, err := rc.keyfunc(v)
 		if err != nil {
 			return err
 		}
@@ -294,7 +360,11 @@ func (rc *RuleContext) Add(obj interface{}) error {
 			return err
 		}
 
-		kind, name, namespace := res["kind"].(string), res["metadata"].(map[string]interface{})["name"].(string), res["metadata"].(map[string]interface{})["namespace"].(string)
+		//		kind, name, namespace := res["kind"].(string), res["metadata"].(map[string]interface{})["name"].(string), res["metadata"].(map[string]interface{})["namespace"].(string)
+		kind, name, namespace, err := rc.keyfunc(res)
+		if err != nil {
+			return err
+		}
 
 		_, err = rc.tx.Exec(fmt.Sprintf("INSERT INTO resources (KIND, NAME, NAMESPACE, DATA) VALUES ('%s', '%s', '%s', '%s') ON CONFLICT DO UPDATE SET DATA = excluded.DATA", kind, name, namespace, s))
 		if err != nil {
